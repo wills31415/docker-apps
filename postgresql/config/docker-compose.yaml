@@ -1,0 +1,154 @@
+# =============================================================================
+# Cluster : postgresql
+# Services : PostgreSQL + Adminer
+# =============================================================================
+# Rappel sur les chemins relatifs :
+#   Ce fichier se trouve dans config/, donc "../shared/" pointe vers
+#   le répertoire "postgresql/shared/" de l'hôte.
+# =============================================================================
+
+# Version du format Docker Compose.
+# "3.8" est recommandée pour une bonne compatibilité avec Docker Engine 19.03+.
+version: "3.8"
+
+# =============================================================================
+# RÉSEAUX
+# Un réseau dédié isole les services du cluster des autres containers Docker.
+# Les services communiquent entre eux via leurs noms de service (ex: "postgres").
+# =============================================================================
+networks:
+  postgresql_net:
+    # "bridge" est le driver par défaut pour les réseaux locaux mono-hôte.
+    # Alternatives possibles : "host" (pas d'isolation), "overlay" (multi-hôte Swarm).
+    driver: bridge
+
+# =============================================================================
+# VOLUMES NOMMÉS
+# Déclarés ici pour que Docker les gère explicitement.
+# Alternative : utiliser des bind mounts (voir le service postgres ci-dessous).
+# =============================================================================
+# Aucun volume nommé ici : on utilise des bind mounts vers shared/ pour
+# garder les données directement accessibles depuis l'hôte.
+
+# =============================================================================
+# SERVICES
+# =============================================================================
+services:
+
+  # ---------------------------------------------------------------------------
+  # SERVICE : postgres
+  # Image officielle PostgreSQL — https://hub.docker.com/_/postgres
+  # ---------------------------------------------------------------------------
+  postgres:
+    # Image à utiliser. Fixer une version précise (ex: "16.3") plutôt que
+    # "latest" évite les surprises lors des mises à jour.
+    image: postgres:16
+
+    # Nom explicite du container (visible dans `docker ps`).
+    # Si omis, Docker génère un nom aléatoire.
+    container_name: postgresql_db
+
+    # Politique de redémarrage automatique du container.
+    # "unless-stopped" : redémarre toujours sauf si arrêté manuellement.
+    # Autres valeurs : "no" | "always" | "on-failure[:n]"
+    restart: unless-stopped
+
+    # Variables d'environnement lues par l'image postgres au premier démarrage
+    # pour initialiser la base de données.
+    # ⚠️  Ces valeurs sont en clair ici — envisager un fichier .env ou
+    #     Docker Secrets pour un environnement de production.
+    environment:
+      # Mot de passe du super-utilisateur "postgres".
+      POSTGRES_PASSWORD: changeme
+
+      # Nom d'utilisateur applicatif créé automatiquement au premier démarrage.
+      # Si omis, seul le super-user "postgres" existe.
+      POSTGRES_USER: app_user
+
+      # Nom de la base de données créée automatiquement pour POSTGRES_USER.
+      POSTGRES_DB: app_db
+
+      # Répertoire de données à l'intérieur du container.
+      # Doit correspondre à la cible du bind mount ci-dessous.
+      PGDATA: /var/lib/postgresql/data
+
+    # Bind mounts : relie des chemins de l'hôte à des chemins dans le container.
+    volumes:
+      # Persistance des données PostgreSQL.
+      # "../shared/data" (hôte) ←→ "/var/lib/postgresql/data" (container)
+      # ⚠️  Ce répertoire doit être vide ou contenir un cluster PG valide
+      #     au premier démarrage.
+      - ../shared/data:/var/lib/postgresql/data
+
+      # Scripts SQL ou shell placés dans shared/initdb/ sont exécutés
+      # automatiquement lors de la toute première initialisation de la base.
+      # Ordre d'exécution : alphabétique. Fichiers supportés : .sql, .sql.gz, .sh
+      # ⚠️  Ignoré si le répertoire shared/data/ existe déjà (déjà initialisé).
+      - ../shared/initdb:/docker-entrypoint-initdb.d:ro
+
+    # Publication du port PostgreSQL sur l'hôte.
+    # "5432:5432" → port_hôte:port_container
+    # Retirer ou commenter cette section si l'accès depuis l'hôte n'est pas requis
+    # (Adminer peut atteindre Postgres via le réseau interne sans exposition).
+    ports:
+      - "5432:5432"
+
+    # Contrôle de santé : Docker vérifie périodiquement que Postgres accepte
+    # des connexions. Utile pour les dépendances entre services (depends_on).
+    healthcheck:
+      # pg_isready retourne 0 si le serveur est prêt à recevoir des connexions.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-postgres}"]
+      # Délai avant le premier check après le démarrage du container.
+      start_period: 10s
+      # Intervalle entre deux checks.
+      interval: 10s
+      # Délai max avant de considérer le check comme échoué.
+      timeout: 5s
+      # Nombre d'échecs consécutifs avant de marquer le container "unhealthy".
+      retries: 5
+
+    # Rattachement au réseau dédié du cluster.
+    networks:
+      - postgresql_net
+
+  # ---------------------------------------------------------------------------
+  # SERVICE : adminer
+  # Interface web légère de gestion de bases de données — https://www.adminer.org
+  # Supporte PostgreSQL, MySQL, SQLite, et d'autres moteurs.
+  # ---------------------------------------------------------------------------
+  adminer:
+    # Image officielle Adminer.
+    # "adminer:latest" est acceptable ici car Adminer est un outil de dev/admin,
+    # mais fixer une version reste une bonne pratique.
+    image: adminer:latest
+
+    container_name: postgresql_adminer
+
+    restart: unless-stopped
+
+    # Adminer ne démarre qu'une fois Postgres "healthy" (selon le healthcheck).
+    # Sans condition "service_healthy", le container démarrerait mais ne pourrait
+    # pas forcément se connecter immédiatement.
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    # Variables d'environnement optionnelles d'Adminer.
+    environment:
+      # Pré-remplit le champ "Serveur" dans le formulaire de connexion.
+      # "postgres" est le nom du service Docker, résolu via le réseau interne.
+      ADMINER_DEFAULT_SERVER: postgres
+
+      # Thème visuel d'Adminer (optionnel).
+      # Thèmes disponibles : https://www.adminer.org/en/themes/
+      # Exemples : "pepa-linha", "nette", "brade", "ng9", "rmsoft"
+      # Commenter la ligne pour utiliser le thème par défaut.
+      ADMINER_DESIGN: pepa-linha
+
+    # Exposition de l'interface web d'Adminer sur l'hôte.
+    # Accès via : http://localhost:8080
+    ports:
+      - "8080:8080"
+
+    networks:
+      - postgresql_net

@@ -1,0 +1,244 @@
+# ==============================
+# Docker Apps Manager — commande : da
+# ==============================
+
+# --- Base path : répertoire "docker-apps/" (là où ce fichier est sourcé) ---
+if [ -z "$CUSTOM_DOCKER_CLUSTER_BASE_PATH" ]; then
+    CUSTOM_DOCKER_CLUSTER_BASE_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    export CUSTOM_DOCKER_CLUSTER_BASE_PATH
+fi
+
+# --- Options par défaut ---
+DOCKER_COMPOSE_UP_DEFAULT_OPTS=(--detach)
+DOCKER_COMPOSE_DOWN_DEFAULT_OPTS=(--timeout 10)
+DOCKER_COMPOSE_LOGS_DEFAULT_OPTS=(--follow --tail=50)
+
+# ==============================
+# Helpers internes
+# ==============================
+
+__da_list_clusters() {
+    local base="$CUSTOM_DOCKER_CLUSTER_BASE_PATH"
+    for d in "$base"/*/; do
+        [ -d "$d" ] && basename "$d"
+    done
+}
+
+__da_compose_file() {
+    local name="$1"
+    echo "$CUSTOM_DOCKER_CLUSTER_BASE_PATH/$name/config/docker-compose.yaml"
+}
+
+__da_lock_file() {
+    local name="$1"
+    echo "$CUSTOM_DOCKER_CLUSTER_BASE_PATH/$name/.lock"
+}
+
+__da_run_hook() {
+    local script="$1"
+    local label="$2"
+    if [ -f "$script" ]; then
+        if [ -x "$script" ]; then
+            echo "▶️  Exécution de $label..."
+            bash "$script" || { echo "❌ Échec de $label"; return 1; }
+        else
+            echo "⚠️  $label trouvé mais non exécutable (chmod +x ?), ignoré."
+        fi
+    fi
+}
+
+__da_require_cluster() {
+    local name="$1"
+    local dir="$CUSTOM_DOCKER_CLUSTER_BASE_PATH/$name"
+    local compose_file="$(__da_compose_file "$name")"
+
+    [ -n "$name" ]         || { echo "❌ Nom de cluster manquant."; return 1; }
+    [ -d "$dir" ]          || { echo "❌ Cluster introuvable : $name"; return 1; }
+    [ -f "$compose_file" ] || { echo "❌ docker-compose.yaml manquant : $compose_file"; return 1; }
+}
+
+# ==============================
+# Sous-commandes
+# ==============================
+
+__da_up() {
+    local name="$1"; shift
+    __da_require_cluster "$name" || return 1
+
+    local config_dir="$CUSTOM_DOCKER_CLUSTER_BASE_PATH/$name/config"
+    local compose_file="$(__da_compose_file "$name")"
+    local lock="$(__da_lock_file "$name")"
+
+    if [ -f "$lock" ]; then
+        echo "🔒 Cluster déjà actif : $name"
+        sed 's/^/   /' "$lock"
+        return 1
+    fi
+
+    __da_run_hook "$config_dir/pre-up.sh" "pre-up.sh" || return 1
+
+    echo "🚀 Démarrage du cluster : $name"
+    docker compose -f "$compose_file" up "${DOCKER_COMPOSE_UP_DEFAULT_OPTS[@]}" "$@" || {
+        echo "❌ Échec du démarrage de $name"
+        return 1
+    }
+
+    { echo "PID=$$"; echo "STARTED_AT=$(date '+%Y-%m-%d %H:%M:%S')"; } > "$lock"
+    echo "🔒 Lock créé : $lock"
+
+    __da_run_hook "$config_dir/post-up.sh" "post-up.sh"
+    echo "✅ Cluster démarré : $name"
+}
+
+__da_down() {
+    local name="$1"; shift
+    __da_require_cluster "$name" || return 1
+
+    local config_dir="$CUSTOM_DOCKER_CLUSTER_BASE_PATH/$name/config"
+    local compose_file="$(__da_compose_file "$name")"
+    local lock="$(__da_lock_file "$name")"
+
+    if [ ! -f "$lock" ]; then
+        echo "⚠️  Aucun lock trouvé pour $name — cluster peut-être déjà arrêté."
+        echo "   Tentative d'arrêt quand même..."
+    fi
+
+    __da_run_hook "$config_dir/pre-down.sh" "pre-down.sh" || return 1
+
+    echo "🛑 Arrêt du cluster : $name"
+    docker compose -f "$compose_file" down "${DOCKER_COMPOSE_DOWN_DEFAULT_OPTS[@]}" "$@" || {
+        echo "❌ Échec de l'arrêt de $name"
+        return 1
+    }
+
+    if [ -f "$lock" ]; then
+        rm -f "$lock"
+        echo "🗑️  Lock supprimé : $lock"
+    fi
+
+    __da_run_hook "$config_dir/post-down.sh" "post-down.sh"
+    echo "✅ Cluster arrêté : $name"
+}
+
+__da_restart() {
+    local name="$1"; shift
+    __da_require_cluster "$name" || return 1
+    __da_down "$name" && __da_up "$name" "$@"
+}
+
+__da_status() {
+    echo "📊 Statut des clusters Docker"
+    echo "══════════════════════════════"
+
+    local clusters=( $(__da_list_clusters) )
+
+    if [ ${#clusters[@]} -eq 0 ]; then
+        echo "ℹ️  Aucun cluster trouvé dans $CUSTOM_DOCKER_CLUSTER_BASE_PATH"
+        return
+    fi
+
+    for name in "${clusters[@]}"; do
+        local lock="$(__da_lock_file "$name")"
+        local compose_file="$(__da_compose_file "$name")"
+
+        local compose_warn=""
+        [ ! -f "$compose_file" ] && compose_warn=" ⚠️  (docker-compose.yaml manquant)"
+
+        if [ -f "$lock" ]; then
+            local started_at pid
+            started_at=$(grep '^STARTED_AT=' "$lock" | cut -d= -f2-)
+            pid=$(grep '^PID=' "$lock" | cut -d= -f2)
+            echo "  🟢 $name — Actif$compose_warn"
+            echo "     ├ STARTED_AT : $started_at"
+            echo "     └ PID        : $pid"
+        else
+            echo "  🔴 $name — Arrêté$compose_warn"
+        fi
+    done
+}
+
+__da_logs() {
+    local name="$1"; shift
+    __da_require_cluster "$name" || return 1
+    docker compose -f "$(__da_compose_file "$name")" logs "${DOCKER_COMPOSE_LOGS_DEFAULT_OPTS[@]}" "$@"
+}
+
+__da_build() {
+    local name="$1"; shift
+    __da_require_cluster "$name" || return 1
+    echo "🔨 Build des images du cluster : $name"
+    docker compose -f "$(__da_compose_file "$name")" build "$@"
+}
+
+__da_help() {
+    cat <<EOF
+Usage : da <commande> [cluster] [options...]
+
+Commandes disponibles :
+  up      <cluster>   Monter un cluster (exécute pre-up.sh / post-up.sh si présents)
+  down    <cluster>   Démonter un cluster (exécute pre-down.sh / post-down.sh si présents)
+  restart <cluster>   Redémarrer un cluster (down puis up)
+  build   <cluster>   Construire les images custom d'un cluster
+  logs    <cluster>   Afficher les logs d'un cluster (défaut : --follow --tail=50)
+  status              Afficher le statut de tous les clusters (avec détails des locks)
+  help                Afficher cette aide
+
+Clusters disponibles :
+$(for c in $(__da_list_clusters); do echo "  - $c"; done)
+
+Répertoire de base : $CUSTOM_DOCKER_CLUSTER_BASE_PATH
+EOF
+}
+
+# ==============================
+# Méta-commande principale : da
+# ==============================
+
+da() {
+    local cmd="$1"; shift
+
+    case "$cmd" in
+        up)      __da_up      "$@" ;;
+        down)    __da_down    "$@" ;;
+        restart) __da_restart "$@" ;;
+        status)  __da_status  "$@" ;;
+        logs)    __da_logs    "$@" ;;
+        build)   __da_build   "$@" ;;
+        help|"") __da_help       ;;
+        *)
+            echo "❌ Commande inconnue : '$cmd'"
+            echo "   Tapez 'da help' pour la liste des commandes."
+            return 1
+            ;;
+    esac
+}
+
+# ==============================
+# Autocomplétion Bash
+# ==============================
+
+# Sous-commandes exposées par 'da'
+__da_subcommands="up down restart build logs status help"
+
+# Sous-commandes qui attendent un nom de cluster en 2e argument
+__da_cluster_subcommands="up down restart build logs"
+
+__da_complete() {
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+
+    case "$COMP_CWORD" in
+        1)
+            # Complétion des sous-commandes
+            COMPREPLY=( $(compgen -W "$__da_subcommands" -- "$cur") )
+            ;;
+        2)
+            # Complétion du nom de cluster pour les sous-commandes qui en ont besoin
+            local subcmd="${COMP_WORDS[1]}"
+            if [[ " $__da_cluster_subcommands " == *" $subcmd "* ]]; then
+                COMPREPLY=( $(compgen -W "$(__da_list_clusters)" -- "$cur") )
+            fi
+            ;;
+    esac
+}
+
+complete -F __da_complete da
