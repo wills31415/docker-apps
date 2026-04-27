@@ -15,9 +15,6 @@
 #   https://docker-minecraft-server.readthedocs.io
 # =============================================================================
 
-# Version du format Docker Compose.
-version: "3.8"
-
 # =============================================================================
 # RÉSEAUX
 # Un réseau dédié isole le serveur Minecraft des autres containers Docker.
