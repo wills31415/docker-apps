@@ -8,7 +8,20 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 echo "⚠️  [pre-down] Arrêt du serveur Minecraft en cours..."
+
+# --- Stopper le watcher dynmap-auto-render -----------------------------------
+WATCHER_PID_FILE="$SCRIPT_DIR/../shared/dynmap-auto-render.pid"
+if [ -f "$WATCHER_PID_FILE" ]; then
+    watcher_pid=$(cat "$WATCHER_PID_FILE" 2>/dev/null || true)
+    if [ -n "$watcher_pid" ] && kill -0 "$watcher_pid" 2>/dev/null; then
+        kill "$watcher_pid" 2>/dev/null || true
+        echo "🔁 [pre-down] Watcher dynmap-auto-render arrêté (PID $watcher_pid)."
+    fi
+    rm -f "$WATCHER_PID_FILE"
+fi
 
 # --- Sauvegarde du monde avant arrêt (décommenter si souhaité) ---------------
 #
