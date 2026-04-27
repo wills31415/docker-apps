@@ -63,9 +63,11 @@ services:
     # Publication des ports sur l'hôte.
     #   - Port jeu : accessible depuis l'extérieur (pour les joueurs).
     #   - Port RCON : accessible sur le LAN (ne PAS ouvrir en NAT/PAT sur le routeur).
+    #   - Port Dynmap : carte web (ouvrable en NAT/PAT sur le routeur).
     ports:
       - "${SERVER_PORT:-25565}:25565"
       - "${RCON_PORT:-25575}:25575"
+      - "${DYNMAP_PORT:-25566}:8123"
 
     # Persistance des données du serveur (monde, mods, config, logs).
     # Tout le contenu de /data dans le container est sauvegardé dans shared/data/.
