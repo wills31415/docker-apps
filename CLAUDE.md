@@ -54,6 +54,7 @@ docker-apps/
 | Cluster | Description | Particularités |
 |---------|-------------|----------------|
 | `postgresql` | PostgreSQL 16 + Adminer | Healthcheck, initdb scripts, réseau isolé |
+| `minecraft-server` | Serveur Minecraft Fabric + modpacks Modrinth | Config via `.env`, healthcheck, RCON |
 | `ssh-lab` | Lab SSH multi-noeud (master/client/gateway/server) | Compose auto-généré, topologie configurable via `cluster.conf` |
 | `sftp` | Serveur SFTP (atmoz/sftp) | Minimal, port 2222 |
 

@@ -1,0 +1,93 @@
+# =============================================================================
+# Cluster : minecraft-server
+# Services : Minecraft (itzg/minecraft-server)
+# =============================================================================
+# Rappel sur les chemins relatifs :
+#   Ce fichier se trouve dans config/, donc "../shared/" pointe vers
+#   le répertoire "minecraft-server/shared/" de l'hôte.
+#
+# Configuration :
+#   Toute la configuration du serveur se fait dans le fichier .env
+#   situé dans ce même répertoire. Modifier .env puis relancer :
+#     da restart minecraft-server
+#
+# Documentation de l'image :
+#   https://docker-minecraft-server.readthedocs.io
+# =============================================================================
+
+# Version du format Docker Compose.
+version: "3.8"
+
+# =============================================================================
+# RÉSEAUX
+# Un réseau dédié isole le serveur Minecraft des autres containers Docker.
+# =============================================================================
+networks:
+  minecraft_net:
+    driver: bridge
+
+# =============================================================================
+# SERVICES
+# =============================================================================
+services:
+
+  # ---------------------------------------------------------------------------
+  # SERVICE : minecraft
+  # Image itzg/minecraft-server — https://hub.docker.com/r/itzg/minecraft-server
+  # Serveur Minecraft hautement configurable via variables d'environnement.
+  # ---------------------------------------------------------------------------
+  minecraft:
+    image: itzg/minecraft-server:latest
+
+    # Nom explicite du container (visible dans `docker ps`, utilisé par les hooks).
+    container_name: minecraft_server
+
+    # Redémarrage automatique sauf arrêt manuel.
+    restart: unless-stopped
+
+    # Nécessaire pour l'accès interactif à la console via `docker attach`.
+    tty: true
+    stdin_open: true
+
+    # Charger toutes les variables de configuration depuis le fichier .env.
+    env_file:
+      - .env
+
+    # Variables critiques hardcodées ici (ne doivent jamais être retirées) :
+    environment:
+      # Acceptation obligatoire du CLUF Minecraft.
+      # Sans cette variable, le container refuse de démarrer.
+      EULA: "TRUE"
+
+      # Permet aux variables d'environnement de piloter server.properties.
+      # Sans cela, les variables comme DIFFICULTY, MODE, etc. sont ignorées.
+      OVERRIDE_SERVER_PROPERTIES: "true"
+
+    # Publication des ports sur l'hôte.
+    #   - Port jeu : accessible depuis l'extérieur (pour les joueurs).
+    #   - Port RCON : 127.0.0.1 uniquement (administration locale).
+    ports:
+      - "${SERVER_PORT:-25565}:25565"
+      - "127.0.0.1:${RCON_PORT:-25575}:25575"
+
+    # Persistance des données du serveur (monde, mods, config, logs).
+    # Tout le contenu de /data dans le container est sauvegardé dans shared/data/.
+    volumes:
+      - ../shared/data:/data
+
+    # Contrôle de santé du serveur.
+    # mc-health est un utilitaire intégré à l'image qui vérifie que le serveur
+    # accepte des connexions Minecraft (Server List Ping).
+    #
+    # start_period élevé (5 min) car le premier démarrage avec un modpack
+    # implique le téléchargement et l'installation de nombreux fichiers.
+    healthcheck:
+      test: mc-health
+      start_period: 5m
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+    # Rattachement au réseau dédié du cluster.
+    networks:
+      - minecraft_net
