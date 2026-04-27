@@ -1,0 +1,236 @@
+# ============================================================
+# AUTO-GÉNÉRÉ par pre-up.sh — NE PAS MODIFIER MANUELLEMENT
+# Modifiez config/cluster.conf puis relancez : da restart ssh-lab
+# ============================================================
+
+networks:
+
+  # Réseau frontal : CLIENTs + GATEWAYs + MASTER
+  client-net:
+    driver: bridge
+
+  # Réseau des SERVERs + GATEWAYs + MASTER
+  # PAS d'internal: true → les SERVERs ont accès à Internet (apk, curl…)
+  # L'isolation SSH est garantie TOPOLOGIQUEMENT : CLIENTs et SERVERs ne
+  # partagent aucun réseau commun, donc aucune route directe entre eux.
+  # Le seul chemin SSH vers les SERVERs passe par une GATEWAY (jump host).
+  server-net:
+    driver: bridge
+
+services:
+
+# ── MASTER ──────────────────────────────────────────────────
+
+  master:
+    build:
+      context: ./master
+    container_name: ssh-master
+    hostname: master
+    networks:
+      - client-net
+      - server-net
+    environment:
+      - ROOT_PASSWORD=testpass
+      - ADMIN_PASSWORD=adminpass
+      - NODE_ROLE=master
+      - NODE_INDEX=1
+      - LOG_LEVEL=VERBOSE
+      - N_CLIENTS=3
+      - N_GATEWAYS=1
+      - N_SERVERS=2
+    volumes:
+      # Volumes nommés — persistence
+      - sshlab_master_home:/root
+      - sshlab_master_etcssh:/etc/ssh
+      # Clé admin en lecture seule (private + public)
+      - ../shared/admin-key:/admin-key:ro
+      # Uploads depuis l'hôte
+      - ../shared/uploads/all:/uploads/all:ro
+      - ../shared/uploads/master:/uploads/role:ro
+    stop_signal: SIGTERM
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+
+# ── CLIENTs ─────────────────────────────────────────────────
+
+  client-1:
+    build:
+      context: ./client
+    container_name: ssh-client-1
+    hostname: client-1
+    networks:
+      - client-net
+    environment:
+      - ROOT_PASSWORD=testpass
+      - ADMIN_PASSWORD=adminpass
+      - NODE_ROLE=client
+      - NODE_INDEX=1
+      - LOG_LEVEL=VERBOSE
+    volumes:
+      - sshlab_client_1_home:/root
+      - ../shared/admin-key:/admin-key:ro
+      - ../shared/uploads/all:/uploads/all:ro
+      - ../shared/uploads/clients:/uploads/role:ro
+    stop_signal: SIGTERM
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+
+  client-2:
+    build:
+      context: ./client
+    container_name: ssh-client-2
+    hostname: client-2
+    networks:
+      - client-net
+    environment:
+      - ROOT_PASSWORD=testpass
+      - ADMIN_PASSWORD=adminpass
+      - NODE_ROLE=client
+      - NODE_INDEX=2
+      - LOG_LEVEL=VERBOSE
+    volumes:
+      - sshlab_client_2_home:/root
+      - ../shared/admin-key:/admin-key:ro
+      - ../shared/uploads/all:/uploads/all:ro
+      - ../shared/uploads/clients:/uploads/role:ro
+    stop_signal: SIGTERM
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+
+  client-3:
+    build:
+      context: ./client
+    container_name: ssh-client-3
+    hostname: client-3
+    networks:
+      - client-net
+    environment:
+      - ROOT_PASSWORD=testpass
+      - ADMIN_PASSWORD=adminpass
+      - NODE_ROLE=client
+      - NODE_INDEX=3
+      - LOG_LEVEL=VERBOSE
+    volumes:
+      - sshlab_client_3_home:/root
+      - ../shared/admin-key:/admin-key:ro
+      - ../shared/uploads/all:/uploads/all:ro
+      - ../shared/uploads/clients:/uploads/role:ro
+    stop_signal: SIGTERM
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+
+# ── GATEWAYs ────────────────────────────────────────────────
+
+  gateway-1:
+    build:
+      context: ./gateway
+    container_name: ssh-gateway-1
+    hostname: gateway-1
+    networks:
+      - client-net
+      - server-net
+    ports:
+      - "2221:22"
+    environment:
+      - ROOT_PASSWORD=testpass
+      - ADMIN_PASSWORD=adminpass
+      - NODE_ROLE=gateway
+      - NODE_INDEX=1
+      - LOG_LEVEL=VERBOSE
+    volumes:
+      - sshlab_gateway_1_home:/root
+      - sshlab_gateway_1_etcssh:/etc/ssh
+      - ../shared/admin-key:/admin-key:ro
+      - ../shared/uploads/all:/uploads/all:ro
+      - ../shared/uploads/gateways:/uploads/role:ro
+    stop_signal: SIGTERM
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+
+# ── SERVERs ─────────────────────────────────────────────────
+
+  server-1:
+    build:
+      context: ./server
+    container_name: ssh-server-1
+    hostname: server-1
+    networks:
+      - server-net
+    environment:
+      - ROOT_PASSWORD=testpass
+      - ADMIN_PASSWORD=adminpass
+      - NODE_ROLE=server
+      - NODE_INDEX=1
+      - LOG_LEVEL=VERBOSE
+    volumes:
+      - sshlab_server_1_home:/root
+      - sshlab_server_1_etcssh:/etc/ssh
+      - ../shared/admin-key:/admin-key:ro
+      - ../shared/uploads/all:/uploads/all:ro
+      - ../shared/uploads/servers:/uploads/role:ro
+    stop_signal: SIGTERM
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+
+  server-2:
+    build:
+      context: ./server
+    container_name: ssh-server-2
+    hostname: server-2
+    networks:
+      - server-net
+    environment:
+      - ROOT_PASSWORD=testpass
+      - ADMIN_PASSWORD=adminpass
+      - NODE_ROLE=server
+      - NODE_INDEX=2
+      - LOG_LEVEL=VERBOSE
+    volumes:
+      - sshlab_server_2_home:/root
+      - sshlab_server_2_etcssh:/etc/ssh
+      - ../shared/admin-key:/admin-key:ro
+      - ../shared/uploads/all:/uploads/all:ro
+      - ../shared/uploads/servers:/uploads/role:ro
+    stop_signal: SIGTERM
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+
+# ── Volumes nommés ──────────────────────────────────────────
+volumes:
+
+  # MASTER
+  sshlab_master_home:
+    name: sshlab_master_home
+  sshlab_master_etcssh:
+    name: sshlab_master_etcssh
+
+  # CLIENTs — /root
+  sshlab_client_1_home:
+    name: sshlab_client_1_home
+  sshlab_client_2_home:
+    name: sshlab_client_2_home
+  sshlab_client_3_home:
+    name: sshlab_client_3_home
+
+  # GATEWAYs — /root + /etc/ssh
+  sshlab_gateway_1_home:
+    name: sshlab_gateway_1_home
+  sshlab_gateway_1_etcssh:
+    name: sshlab_gateway_1_etcssh
+
+  # SERVERs — /root + /etc/ssh
+  sshlab_server_1_home:
+    name: sshlab_server_1_home
+  sshlab_server_1_etcssh:
+    name: sshlab_server_1_etcssh
+  sshlab_server_2_home:
+    name: sshlab_server_2_home
+  sshlab_server_2_etcssh:
+    name: sshlab_server_2_etcssh
