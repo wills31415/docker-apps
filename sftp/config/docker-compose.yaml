@@ -1,0 +1,12 @@
+
+
+services:
+  server:
+    image: atmoz/sftp:latest
+    # container_name: sftp-server
+    restart: unless-stopped
+    hostname: sftp-server
+    ports:
+      - "2222:22"
+    volumes:
+      ../shared/server/uploads:/mnt/uploads

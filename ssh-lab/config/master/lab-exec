@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+# ============================================================
+#  lab-exec — Exécution SSH en parallèle depuis le MASTER
+#             vers les nœuds du lab, via la clé admin.
+#
+#  Usage :
+#    lab-exec <groupe|nœud> <commande>
+#
+#  Groupes disponibles :
+#    all       → tous les nœuds (clients + gateways + servers)
+#    clients   → tous les clients
+#    gateways  → toutes les gateways
+#    servers   → tous les servers
+#    client-N  → un client précis    (ex: client-2)
+#    gateway-N → une gateway précise (ex: gateway-1)
+#    server-N  → un server précis    (ex: server-3)
+#
+#  Exemples :
+#    lab-exec all      "hostname && uptime"
+#    lab-exec servers  "df -h /"
+#    lab-exec clients  "ls /root/.ssh/"
+#    lab-exec server-2 "cat /etc/os-release"
+#    lab-exec gateways "ss -tlnp | grep :22"
+#
+#  Note : utilise SSH + clé admin (/root/.ssh/id_admin).
+#  Tous les nœuds ont la clé publique dans authorized_keys.
+# ============================================================
+set -euo pipefail
+
+N_CLIENTS="${N_CLIENTS:-0}"
+N_GATEWAYS="${N_GATEWAYS:-0}"
+N_SERVERS="${N_SERVERS:-0}"
+ADMIN_KEY="/root/.ssh/id_admin"
+SSH_OPTS="-i ${ADMIN_KEY} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5 -o BatchMode=yes"
+
+usage() { grep '^#  ' "$0" | sed 's/^#  \?//'; exit 0; }
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then usage; fi
+
+if [ $# -lt 2 ]; then
+    echo "❌  Arguments manquants."
+    echo "   Usage : lab-exec <groupe|nœud> <commande>"
+    echo "   Aide  : lab-exec --help"
+    exit 1
+fi
+
+GROUP="$1"; shift
+COMMAND="$*"
+
+[ -z "$COMMAND" ] && { echo "❌  Commande vide."; exit 1; }
+
+# ── Vérification de la clé admin ──────────────────────────────
+if [ ! -f "$ADMIN_KEY" ]; then
+    echo "❌  Clé admin introuvable : $ADMIN_KEY"
+    echo "   Redémarrez le master : docker restart ssh-master"
+    exit 1
+fi
+
+# ── Construction de la liste des hôtes ────────────────────────
+HOSTS=()
+case "$GROUP" in
+    all)
+        for i in $(seq 1 "$N_CLIENTS");  do HOSTS+=("client-$i");  done
+        for i in $(seq 1 "$N_GATEWAYS"); do HOSTS+=("gateway-$i"); done
+        for i in $(seq 1 "$N_SERVERS");  do HOSTS+=("server-$i");  done
+        ;;
+    clients)   for i in $(seq 1 "$N_CLIENTS");  do HOSTS+=("client-$i");  done ;;
+    gateways)  for i in $(seq 1 "$N_GATEWAYS"); do HOSTS+=("gateway-$i"); done ;;
+    servers)   for i in $(seq 1 "$N_SERVERS");  do HOSTS+=("server-$i");  done ;;
+    client-[0-9]*|gateway-[0-9]*|server-[0-9]*)
+        HOSTS+=("$GROUP") ;;
+    *)
+        echo "❌  Groupe ou nœud inconnu : '$GROUP'"
+        echo "   Groupes : all | clients | gateways | servers"
+        echo "   Nœuds   : client-N | gateway-N | server-N"
+        exit 1 ;;
+esac
+
+[ "${#HOSTS[@]}" -eq 0 ] && {
+    echo "⚠️  Aucun hôte dans '$GROUP' — vérifiez les variables N_*"
+    exit 1
+}
+
+# ── Exécution SSH en parallèle ────────────────────────────────
+TMPDIR_LAB="$(mktemp -d /tmp/lab-exec.XXXXXX)"
+trap 'rm -rf "$TMPDIR_LAB"' EXIT
+
+TOTAL="${#HOSTS[@]}"
+echo ""
+printf "🔧  lab-exec [%s] → %d nœud(s)\n" "$GROUP" "$TOTAL"
+printf "    Commande : %s\n" "$COMMAND"
+printf "    %s\n" "$(printf '═%.0s' $(seq 1 62))"
+echo ""
+
+START_NS="$(date +%s%N 2>/dev/null || echo 0)"
+
+declare -A PIDS
+for host in "${HOSTS[@]}"; do
+    # shellcheck disable=SC2086
+    (
+        ssh $SSH_OPTS "root@${host}" "$COMMAND" > "$TMPDIR_LAB/${host}.out" 2>&1
+        echo $? > "$TMPDIR_LAB/${host}.exit"
+    ) &
+    PIDS["$host"]=$!
+done
+
+for host in "${HOSTS[@]}"; do
+    wait "${PIDS[$host]}" 2>/dev/null || true
+done
+
+END_NS="$(date +%s%N 2>/dev/null || echo 0)"
+ELAPSED_MS=$(( (END_NS - START_NS) / 1000000 ))
+
+# ── Affichage des résultats ───────────────────────────────────
+SUCCESS=0; FAIL=0
+
+for host in "${HOSTS[@]}"; do
+    outfile="$TMPDIR_LAB/${host}.out"
+    exitfile="$TMPDIR_LAB/${host}.exit"
+    exit_code=0; [ -f "$exitfile" ] && exit_code="$(cat "$exitfile")"
+
+    SEP_LEN=$(( 56 - ${#host} )); [ "$SEP_LEN" -lt 4 ] && SEP_LEN=4
+    SEP="$(printf '─%.0s' $(seq 1 $SEP_LEN))"
+
+    if [ "$exit_code" -eq 0 ]; then
+        STATUS="✅"; SUCCESS=$(( SUCCESS + 1 ))
+    else
+        STATUS="❌ (exit ${exit_code})"
+        FAIL=$(( FAIL + 1 ))
+    fi
+
+    printf "── %s %s %s\n" "$STATUS" "$host" "$SEP"
+    if [ -f "$outfile" ] && [ -s "$outfile" ]; then sed 's/^/   /' "$outfile"
+    else echo "   (pas de sortie)"; fi
+    echo ""
+done
+
+printf "    %s\n" "$(printf '═%.0s' $(seq 1 62))"
+printf "    ✅ %d/%d succès" "$SUCCESS" "$TOTAL"
+[ "$FAIL" -gt 0 ] && printf "  │  ❌ %d échec(s)" "$FAIL"
+[ "$ELAPSED_MS" -gt 0 ] && printf "  │  ⏱  %dms" "$ELAPSED_MS"
+printf "\n\n"
+
+[ "$FAIL" -eq 0 ]
