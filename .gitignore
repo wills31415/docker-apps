@@ -2,3 +2,7 @@
 /*/.lock
 .DS_Store
 .claude/
+
+# sync-pack.sh artefacts (build .mrpack locaux)
+/*/dry-run-pack.mrpack
+/*/last-pack.mrpack

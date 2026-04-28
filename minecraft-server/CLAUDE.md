@@ -7,7 +7,7 @@ Guide spécifique au cluster `minecraft-server`. Le `CLAUDE.md` racine couvre la
 - Image : `itzg/minecraft-server:latest`
 - Type : `MODRINTH` (Fabric)
 - Version : Minecraft `1.21.11`, Fabric loader `0.19.2`
-- Modpack : `MODRINTH_MODPACK=/data/Base-1.21.11-1.0.0.mrpack` (`.mrpack` placé dans `shared/data/`)
+- Modpack : projet Modrinth `coupaing-craft` (slug). Tant que Modrinth n'a pas approuvé le projet (Under review initial), `.env` reste sur le fallback local `MODRINTH_MODPACK=/data/coupaing-craft-initial.mrpack`. Workflow d'édition : `./sync-pack.sh` (cf. `SYNC.md`).
 - Mods perf ajoutés par-dessus le pack : `c2me-fabric`, `krypton`
 - Carte web : Dynmap (mod) sur l'hôte `DYNMAP_PORT` (25566) → container 8123
 
@@ -63,6 +63,12 @@ docker exec minecraft_server rcon-cli "dynmap radiusrender world -23 23 256"
 - **Vérifier le client/serveur split AVANT d'exclure**. Depuis MC 1.21.2 les recettes vivent côté serveur → `jei` / `rei` / `emi` doivent être présents côté serveur. Ne pas les mettre dans `MODRINTH_EXCLUDE_FILES`.
 - Les mods perf ajoutés (`c2me-fabric`, `krypton`) sont compatibles `VIEW_DISTANCE` élevé. Lithium et FerriteCore viennent du pack.
 - Pour ajouter un mod : `MODRINTH_PROJECTS=...,nouveau-slug` puis `da restart minecraft-server`.
+
+### Workflow `sync-pack` (édition GUI → publication Modrinth → resync auto)
+
+`./sync-pack.sh "msg"` à la racine du cluster : prend le profil de la **Modrinth App locale** (Kubuntu) comme source de vérité, le packe en `.mrpack`, l'upload sur Modrinth (projet unlisted), puis `da restart`. Voir [`SYNC.md`](./SYNC.md) pour le setup, les flags (`--dry-run`, `--no-upload`, `--no-deploy`) et les paliers de validation.
+
+⚠️ Tant que le palier B (upload OK) n'est pas validé, le `.env` reste en mode `.mrpack` local. La migration vers `MODRINTH_MODPACK=<slug> + MODRINTH_FORCE_SYNCHRONIZE=true` est documentée dans `SYNC.md`.
 
 ## Dynmap
 
