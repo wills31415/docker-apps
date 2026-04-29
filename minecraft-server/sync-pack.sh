@@ -6,7 +6,7 @@
 set -euo pipefail
 
 # ─── Configuration (override via env, sinon valeurs par défaut) ──────────────
-: "${PACK_NAME:=CoupaingCraft}"               # Nom du dossier de profil dans ModrinthApp
+: "${PACK_NAME:=CoupaingCraft-Master}"        # Nom du dossier de profil dans ModrinthApp (profil maître, source de vérité, unlinked du pack)
 : "${PACK_DISPLAY_NAME:=coupaing-craft}"      # Nom utilisé dans le manifest .mrpack (≠ nom du dossier)
 : "${MODRINTH_PROJECT_ID:=4fBwVYft}"          # Modrinth dashboard ⋮ → Copy ID
 : "${MODRINTH_PROJECT_SLUG:=coupaing-craft}"  # Pour affichage / liens
