@@ -34,7 +34,10 @@ services:
   # Serveur Minecraft hautement configurable via variables d'environnement.
   # ---------------------------------------------------------------------------
   minecraft:
-    image: itzg/minecraft-server:latest
+    # Pin sur Java 21 LTS : itzg/minecraft-server:latest est passé à Java 25 (avril 2026)
+    # ce qui casse les mods Fabric compilés contre Java 21 (crash silencieux au boot JVM).
+    # `stable-java21` track les builds testés, plus prudent que `:java21` rolling.
+    image: itzg/minecraft-server:stable-java21
 
     # Nom explicite du container (visible dans `docker ps`, utilisé par les hooks).
     container_name: minecraft_server
