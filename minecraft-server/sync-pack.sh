@@ -24,7 +24,7 @@ fi
 : "${LOADER:=fabric}"                         # fabric / forge / neoforge / quilt
 : "${LOADER_VERSION:=0.19.2}"                 # Version du loader (cohérent avec config/.env)
 : "${SERVER_ONLY_PROJECTS:=c2me-fabric,krypton,dynmap}"  # Forcer env={client:unsupported, server:required}
-: "${CLIENT_REQUIRED_PROJECTS:=lithostitched}"  # Forcer env={client:required, server:required} — pour les mods worldgen tagués client:unsupported sur Modrinth mais en réalité requis côté client (sinon Terralith/Tectonic crashent au load client)
+: "${CLIENT_REQUIRED_PROJECTS:=lithostitched,create-peaceful,harvest-enchantment,create_oxidized,create-pattern-schematics}"  # Forcer env={client:required, server:required} — pour les mods tagués client:unsupported sur Modrinth mais en réalité requis côté client (worldgen, ou mods qui register des items dans le registry partagé serveur/client → kick au join sinon)
 : "${MODRINTH_PROFILE_DIR:=}"                 # Override du chemin du profil (auto-détecté si vide)
 : "${USER_AGENT:=wsl/sync-pack/1.0 (kubuntu-homelab)}"
 : "${TOKEN_FILE:=$HOME/.config/sync-pack/token}"

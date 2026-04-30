@@ -81,26 +81,41 @@ if [ -x "$WATCHER_SCRIPT" ]; then
     echo ""
 fi
 
-# --- Watcher dynmap-grave-marker ---------------------------------------------
-# Synchronise les markers Dynmap du set "graves" depuis universal-graves.dat
-# (le mod n'a pas d'intégration Dynmap native).
-GRAVE_SCRIPT="$SCRIPT_DIR/dynmap-grave-marker.sh"
-GRAVE_PID_FILE="$SCRIPT_DIR/../shared/dynmap-grave-marker.pid"
-GRAVE_LOG_FILE="$SCRIPT_DIR/../shared/dynmap-grave-marker.log"
-
-if [ -f "$GRAVE_PID_FILE" ]; then
-    old_pid=$(cat "$GRAVE_PID_FILE" 2>/dev/null || true)
-    if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
-        kill "$old_pid" 2>/dev/null || true
-    fi
-    rm -f "$GRAVE_PID_FILE"
-fi
-
-if [ -x "$GRAVE_SCRIPT" ]; then
-    nohup "$GRAVE_SCRIPT" >> "$GRAVE_LOG_FILE" 2>&1 &
-    echo $! > "$GRAVE_PID_FILE"
-    disown
-    echo "🪦 [post-up] Watcher dynmap-grave-marker démarré (PID $(cat "$GRAVE_PID_FILE"))."
-    echo "   Logs : minecraft-server/shared/dynmap-grave-marker.log"
-    echo ""
-fi
+# --- Watcher dynmap-grave-marker (DÉSACTIVÉ en 1.20.1) -----------------------
+# Le mod universal-graves 3.10.x (1.21.11) stockait son état dans
+# world/data/universal-graves.dat — le watcher pollait ce fichier pour
+# créer/supprimer les markers Dynmap des tombes + waystones-rich.
+#
+# En 1.20.1 (universal-graves ancien + waystones-fabric Balm), les NBT sont
+# stockés ailleurs (probablement player NBT, format à découvrir). Le watcher
+# tournait à vide et spammait "graves.dat absent". Désactivé jusqu'à ce qu'on
+# adapte le parser au layout 1.20.1.
+#
+# Pour les waystones, l'intégration Dynmap native du mod
+# (waystones-common.toml [compatibility] dynmap = true) crée automatiquement
+# les markers waystones:waystones et waystones:sharestones — pas besoin de
+# wrapper.
+#
+# Pour réactiver : décommenter le bloc ci-dessous + adapter
+# config/dynmap-grave-marker.sh aux chemins NBT 1.20.1.
+#
+# GRAVE_SCRIPT="$SCRIPT_DIR/dynmap-grave-marker.sh"
+# GRAVE_PID_FILE="$SCRIPT_DIR/../shared/dynmap-grave-marker.pid"
+# GRAVE_LOG_FILE="$SCRIPT_DIR/../shared/dynmap-grave-marker.log"
+#
+# if [ -f "$GRAVE_PID_FILE" ]; then
+#     old_pid=$(cat "$GRAVE_PID_FILE" 2>/dev/null || true)
+#     if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
+#         kill "$old_pid" 2>/dev/null || true
+#     fi
+#     rm -f "$GRAVE_PID_FILE"
+# fi
+#
+# if [ -x "$GRAVE_SCRIPT" ]; then
+#     nohup "$GRAVE_SCRIPT" >> "$GRAVE_LOG_FILE" 2>&1 &
+#     echo $! > "$GRAVE_PID_FILE"
+#     disown
+#     echo "🪦 [post-up] Watcher dynmap-grave-marker démarré (PID $(cat "$GRAVE_PID_FILE"))."
+#     echo "   Logs : minecraft-server/shared/dynmap-grave-marker.log"
+#     echo ""
+# fi
