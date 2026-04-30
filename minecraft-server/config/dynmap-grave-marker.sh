@@ -63,7 +63,8 @@ for g in graves:
     # NBT layout for universal-graves 3.10.x (Patbox) :
     #   Id (Long), Position (IntArray[3]), World (String),
     #   GameProfile{Name, Id}, CreationTime (Long), ItemCount (Int)
-    grave_id = str(g.get('Id') or g.get('id') or '')
+    raw_id = g.get('Id') or g.get('id')
+    grave_id = str(int(raw_id)) if raw_id is not None else ''
     world = str(g.get('World') or g.get('world') or '')
     pos = list(g.get('Position') or [])
     if len(pos) >= 3:
