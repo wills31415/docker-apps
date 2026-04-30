@@ -77,7 +77,7 @@ docker exec minecraft_server rcon-cli "dynmap radiusrender world -23 23 256"
 Réglages non-évidents posés cette session :
 - `update-webpath-files: false` — sinon Dynmap écrase `web/` au démarrage et nos overrides UI sautent.
 - `webpage-title: "Carte du serveur"`, `sidebaropened: pinned`, `hideifspectator: true`.
-- `deftemplatesuffix: hires` — résolution 16 ppb (16× plus fin que `lowres`). Tuiles 4× plus petites donc 16× plus à rendre/stocker. Le watcher dynmap-auto-render compense les trous éventuels (Dynmap-Fabric ne supporte pas le trigger `chunkload`).
+- `deftemplatesuffix: lowres` — évite le iso hires qui laissait des trous visibles.
 - Throttling agressif (`tileupdatedelay: 1`, `save-pending-period: 60`, `tiles-rendered-at-once: 4`, `parallelrendercnt: 2`, `per-tick-time-limit: 80`, `maxchunkspertick: 400`, etc.).
 
 ### Limitations Dynmap-Fabric à connaître
