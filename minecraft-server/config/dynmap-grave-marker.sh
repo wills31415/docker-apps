@@ -60,28 +60,25 @@ data = nbt.get('data', {})
 graves = data.get('Graves', [])
 for g in graves:
     g = dict(g)
-    # Best-effort field extraction (mod NBT layout may evolve)
-    uuid = str(g.get('uuid') or g.get('UUID') or g.get('id') or '')
-    world = str(g.get('world') or g.get('World') or g.get('dimension') or g.get('Dimension') or '')
-    # Position can be in 'location' compound or flat keys
-    loc = g.get('location') or g.get('Location') or {}
-    if isinstance(loc, dict) or hasattr(loc, 'items'):
-        loc = dict(loc)
-        x = loc.get('x') or loc.get('X') or g.get('x') or g.get('X') or 0
-        y = loc.get('y') or loc.get('Y') or g.get('y') or g.get('Y') or 0
-        z = loc.get('z') or loc.get('Z') or g.get('z') or g.get('Z') or 0
+    # NBT layout for universal-graves 3.10.x (Patbox) :
+    #   Id (Long), Position (IntArray[3]), World (String),
+    #   GameProfile{Name, Id}, CreationTime (Long), ItemCount (Int)
+    grave_id = str(g.get('Id') or g.get('id') or '')
+    world = str(g.get('World') or g.get('world') or '')
+    pos = list(g.get('Position') or [])
+    if len(pos) >= 3:
+        x, y, z = int(pos[0]), int(pos[1]), int(pos[2])
     else:
-        x = g.get('x') or g.get('X') or 0
-        y = g.get('y') or g.get('Y') or 0
-        z = g.get('z') or g.get('Z') or 0
-    owner = str(g.get('playerName') or g.get('PlayerName') or g.get('owner') or '?')
-    created = int(g.get('creationTime') or g.get('createdAt') or g.get('CreatedAt') or 0)
-    until = int(g.get('protectedUntil') or g.get('ProtectedUntil') or 0)
-    if not uuid:
-        # Log keys for debugging then skip
+        x = y = z = 0
+    gp = g.get('GameProfile')
+    gp = dict(gp) if hasattr(gp, 'items') else {}
+    owner = str(gp.get('Name') or g.get('playerName') or '?')
+    created = int(g.get('CreationTime') or g.get('creationTime') or 0)
+    item_count = int(g.get('ItemCount') or 0)
+    if not grave_id:
         print(f"# unknown_grave_keys: {list(g.keys())}", file=sys.stderr)
         continue
-    print(f"{uuid}\x1f{world}\x1f{int(x)}\x1f{int(y)}\x1f{int(z)}\x1f{owner}\x1f{created}\x1f{until}")
+    print(f"{grave_id}\x1f{world}\x1f{x}\x1f{y}\x1f{z}\x1f{owner}\x1f{created}\x1f{item_count}")
 PY
 }
 
@@ -119,14 +116,19 @@ sync_once() {
     done < <(comm -23 <(echo "$previous_uuids") <(echo "$current_uuids"))
 
     # Added: in current, not in previous → dmarker add
-    while IFS=$'\x1f' read -r uuid world x y z owner created until; do
+    while IFS=$'\x1f' read -r grave_id world x y z owner created item_count; do
         local dynworld="${DIM_TO_WORLD[$world]:-$world}"
-        [ -n "$uuid" ] || continue
+        [ -n "$grave_id" ] || continue
         # Skip if already in previous
-        echo "$previous_uuids" | grep -qx "$uuid" && continue
-        local label="Tombe de ${owner} (${x},${y},${z})"
-        log "➕ grave added: $uuid → $dynworld ($x,$y,$z) [$owner]"
-        dmarker "dmarker add id:grave-$uuid set:graves icon:skull label:\"$label\" world:$dynworld x:$x y:$y z:$z"
+        echo "$previous_uuids" | grep -qx "$grave_id" && continue
+        local label
+        if [ "$item_count" -gt 0 ] 2>/dev/null; then
+            label="Tombe de ${owner} (${x}, ${y}, ${z}) — ${item_count} item(s)"
+        else
+            label="Tombe de ${owner} (${x}, ${y}, ${z})"
+        fi
+        log "➕ grave added: $grave_id → $dynworld ($x,$y,$z) [$owner, ${item_count} items]"
+        dmarker "dmarker add id:grave-$grave_id set:graves icon:skull label:\"$label\" world:$dynworld x:$x y:$y z:$z"
     done < "$current_tsv"
 
     mv "$current_tsv" "$STATE_FILE"
