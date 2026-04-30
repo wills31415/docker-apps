@@ -14,6 +14,7 @@ set -euo pipefail
 : "${LOADER:=fabric}"                         # fabric / forge / neoforge / quilt
 : "${LOADER_VERSION:=0.19.2}"                 # Version du loader (cohérent avec config/.env)
 : "${SERVER_ONLY_PROJECTS:=c2me-fabric,krypton,dynmap}"  # Forcer env={client:unsupported, server:required}
+: "${CLIENT_REQUIRED_PROJECTS:=lithostitched}"  # Forcer env={client:required, server:required} — pour les mods worldgen tagués client:unsupported sur Modrinth mais en réalité requis côté client (sinon Terralith/Tectonic crashent au load client)
 : "${MODRINTH_PROFILE_DIR:=}"                 # Override du chemin du profil (auto-détecté si vide)
 : "${USER_AGENT:=wsl/sync-pack/1.0 (kubuntu-homelab)}"
 : "${TOKEN_FILE:=$HOME/.config/sync-pack/token}"
@@ -190,6 +191,7 @@ GAME_VERSION="$GAME_VERSION" \
 LOADER="$LOADER" \
 LOADER_VERSION="$LOADER_VERSION" \
 SERVER_ONLY_PROJECTS="$SERVER_ONLY_PROJECTS" \
+CLIENT_REQUIRED_PROJECTS="$CLIENT_REQUIRED_PROJECTS" \
 MRPACK_PATH="$MRPACK_PATH" \
 PACK_VERSION="$VERSION_NUMBER" \
 PACK_DISPLAY_NAME="$PACK_DISPLAY_NAME" \
@@ -208,6 +210,7 @@ pack_version   = os.environ["PACK_VERSION"]
 display_name   = os.environ.get("PACK_DISPLAY_NAME") or profile.name
 ua             = os.environ["USER_AGENT"]
 server_only    = {s.strip() for s in os.environ.get("SERVER_ONLY_PROJECTS", "").split(",") if s.strip()}
+client_required = {s.strip() for s in os.environ.get("CLIENT_REQUIRED_PROJECTS", "").split(",") if s.strip()}
 
 mods_dir = profile / "mods"
 if not mods_dir.is_dir():
@@ -270,6 +273,9 @@ for jar in jars:
     if slug in server_only or project_id in server_only:
         env = {"client": "unsupported", "server": "required"}
         print(f"    🛡️  forced server-only ({slug})")
+    elif slug in client_required or project_id in client_required:
+        env = {"client": "required", "server": "required"}
+        print(f"    📌 forced client-required ({slug})")
 
     primary = next((f for f in version_info["files"] if f.get("primary")), version_info["files"][0])
     files.append({
