@@ -23,6 +23,17 @@ if [ -f "$WATCHER_PID_FILE" ]; then
     rm -f "$WATCHER_PID_FILE"
 fi
 
+# --- Stopper le watcher dynmap-grave-marker ----------------------------------
+GRAVE_PID_FILE="$SCRIPT_DIR/../shared/dynmap-grave-marker.pid"
+if [ -f "$GRAVE_PID_FILE" ]; then
+    grave_pid=$(cat "$GRAVE_PID_FILE" 2>/dev/null || true)
+    if [ -n "$grave_pid" ] && kill -0 "$grave_pid" 2>/dev/null; then
+        kill "$grave_pid" 2>/dev/null || true
+        echo "🪦 [pre-down] Watcher dynmap-grave-marker arrêté (PID $grave_pid)."
+    fi
+    rm -f "$GRAVE_PID_FILE"
+fi
+
 # --- Sauvegarde du monde avant arrêt (décommenter si souhaité) ---------------
 #
 # echo "💾 [pre-down] Sauvegarde du monde en cours..."

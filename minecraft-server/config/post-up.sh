@@ -80,3 +80,27 @@ if [ -x "$WATCHER_SCRIPT" ]; then
     echo "   Logs : minecraft-server/shared/dynmap-auto-render.log"
     echo ""
 fi
+
+# --- Watcher dynmap-grave-marker ---------------------------------------------
+# Synchronise les markers Dynmap du set "graves" depuis universal-graves.dat
+# (le mod n'a pas d'intégration Dynmap native).
+GRAVE_SCRIPT="$SCRIPT_DIR/dynmap-grave-marker.sh"
+GRAVE_PID_FILE="$SCRIPT_DIR/../shared/dynmap-grave-marker.pid"
+GRAVE_LOG_FILE="$SCRIPT_DIR/../shared/dynmap-grave-marker.log"
+
+if [ -f "$GRAVE_PID_FILE" ]; then
+    old_pid=$(cat "$GRAVE_PID_FILE" 2>/dev/null || true)
+    if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
+        kill "$old_pid" 2>/dev/null || true
+    fi
+    rm -f "$GRAVE_PID_FILE"
+fi
+
+if [ -x "$GRAVE_SCRIPT" ]; then
+    nohup "$GRAVE_SCRIPT" >> "$GRAVE_LOG_FILE" 2>&1 &
+    echo $! > "$GRAVE_PID_FILE"
+    disown
+    echo "🪦 [post-up] Watcher dynmap-grave-marker démarré (PID $(cat "$GRAVE_PID_FILE"))."
+    echo "   Logs : minecraft-server/shared/dynmap-grave-marker.log"
+    echo ""
+fi
