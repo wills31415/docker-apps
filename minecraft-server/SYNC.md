@@ -86,6 +86,18 @@ SERVER_ONLY_PROJECTS="c2me-fabric,krypton,dynmap,nouveau-slug" ./sync-pack.sh "m
 ```
 Ou éditer la valeur par défaut en tête de `sync-pack.sh`.
 
+## Pièges à l'ajout d'un mod
+
+Avant d'ajouter un mod au profil master, vérifier :
+
+1. **Version Minecraft strict** : un mod tagué pour `1.21.10` peut refuser de charger sur `1.21.11` (ex: `accessorify 2.4.0-beta.5` → `{depends minecraft @ [1.21.10]}` strict). Faire `curl 'https://api.modrinth.com/v2/project/<slug>/version?loaders=["fabric"]&game_versions=["1.21.11"]'` et vérifier qu'au moins une version sort. Pas de filet : Modrinth ne refuse pas l'install au build.
+
+2. **Hard deps client-only** : certains mods déclarent `modmenu` en dépendance `required` (ex: `underground-village,-stoneholm`). ModMenu est `client:required, server:unsupported` → côté serveur, Fabric Loader refuse de charger le mod. Soit downgrade vers une version sans cette dep (Stoneholm 1.5.2 sur 1.20.1 n'avait pas ce hard dep), soit retirer le mod.
+
+3. **Java version** : versions alpha de C2ME (`0.3.7+alpha.0.x`) exigent Java 22+ (`{depends java @ [>=22]}`). L'image `itzg/minecraft-server:stable-java21` est figée sur Java 21 — utiliser le track `release` (`0.3.6.0.0` au moment de l'écriture).
+
+4. **Fabric loader compat** : certains mods exigent un loader 0.16+ ou un fabric-api récent. Vérifier dans `dependencies` du fichier de version Modrinth.
+
 ## Mods incompatibles serveur
 
 Si un mod déclaré `server: required` sur Modrinth plante en réalité côté serveur (souvent un mod client-only mal taggé), l'ajouter à `MODRINTH_EXCLUDE_FILES` dans `config/.env` :
@@ -124,10 +136,11 @@ Une fois le projet **Approved** sur Modrinth, basculer en mode "slug + auto-sync
 -MODRINTH_MODPACK=/data/coupaing-craft-initial.mrpack
 +MODRINTH_MODPACK=coupaing-craft
 +MODRINTH_VERSION_TYPE=release
-+MODRINTH_FORCE_SYNCHRONIZE=true
--MODRINTH_PROJECTS=c2me-fabric,krypton,dynmap
-+MODRINTH_PROJECTS=
+ MODRINTH_FORCE_SYNCHRONIZE=true
+ MODRINTH_PROJECTS=
 ```
+
+`MODRINTH_FORCE_SYNCHRONIZE=true` et `MODRINTH_PROJECTS=` (vide) sont déjà actifs depuis la migration "profil master" — les 6 mods server-only sont inclus directement dans le pack.
 
 Rollback : remettre `MODRINTH_MODPACK=/data/coupaing-craft-initial.mrpack` ; le fichier reste dans `shared/data/`.
 
