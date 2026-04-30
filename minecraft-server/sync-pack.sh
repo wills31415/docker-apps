@@ -5,6 +5,16 @@
 
 set -euo pipefail
 
+# Lire VERSION + FABRIC_LOADER_VERSION depuis config/.env AVANT les defaults
+# pour éviter la dérive entre le .env serveur et le manifest .mrpack uploadé.
+_self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$_self_dir/config/.env" ]; then
+    _ev=$(grep -E '^\s*VERSION\s*=' "$_self_dir/config/.env" | head -1 | cut -d= -f2- | tr -d '"' | xargs)
+    _el=$(grep -E '^\s*FABRIC_LOADER_VERSION\s*=' "$_self_dir/config/.env" | head -1 | cut -d= -f2- | tr -d '"' | xargs)
+    [ -n "${_ev:-}" ] && [ -z "${GAME_VERSION:-}" ] && GAME_VERSION="$_ev"
+    [ -n "${_el:-}" ] && [ -z "${LOADER_VERSION:-}" ] && LOADER_VERSION="$_el"
+fi
+
 # ─── Configuration (override via env, sinon valeurs par défaut) ──────────────
 : "${PACK_NAME:=CoupaingCraft-Master}"        # Nom du dossier de profil dans ModrinthApp (profil maître, source de vérité, unlinked du pack)
 : "${PACK_DISPLAY_NAME:=coupaing-craft}"      # Nom utilisé dans le manifest .mrpack (≠ nom du dossier)
@@ -350,6 +360,7 @@ UPLOAD_DATA="$(VERSION="$VERSION_NUMBER" \
                 GAME_VERSION="$GAME_VERSION" \
                 LOADER="$LOADER" \
                 MODRINTH_PROJECT_ID="$MODRINTH_PROJECT_ID" \
+                VERSION_TYPE="${VERSION_TYPE:-beta}" \
   python3 - <<'PY'
 import json, os
 print(json.dumps({
@@ -358,7 +369,7 @@ print(json.dumps({
     "changelog":      os.environ["CHANGELOG"],
     "dependencies":   [],
     "game_versions":  [os.environ["GAME_VERSION"]],
-    "version_type":   "release",
+    "version_type":   os.environ.get("VERSION_TYPE", "beta"),
     "loaders":        [os.environ["LOADER"]],
     "featured":       False,
     "project_id":     os.environ["MODRINTH_PROJECT_ID"],
