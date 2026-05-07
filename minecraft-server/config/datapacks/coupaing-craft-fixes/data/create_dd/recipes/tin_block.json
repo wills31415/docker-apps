@@ -1,0 +1,6 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": ["###","###","###"],
+  "key": {"#": {"item": "create_dd:tin_ingot"}},
+  "result": {"item": "create_dd:tin_block", "count": 1}
+}

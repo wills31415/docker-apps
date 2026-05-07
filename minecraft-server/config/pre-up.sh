@@ -39,4 +39,29 @@ if [ "$DRIFT_COUNT" -gt 0 ]; then
     exit 1
 fi
 
+# -----------------------------------------------------------------------------
+# Datapacks maison versionnés : zip + copie depuis config/datapacks/<nom>/ vers
+# shared/data/world/datapacks/<nom>.zip. Les sources sont raw (versionnées dans
+# le repo), les zips de runtime sont gitignored. Régénération conditionnelle :
+# uniquement si une source est plus récente que le zip déployé.
+# -----------------------------------------------------------------------------
+DATAPACKS_SRC="$SCRIPT_DIR/datapacks"
+DATAPACKS_DST="$SHARED_DIR/data/world/datapacks"
+
+if [ -d "$DATAPACKS_SRC" ]; then
+    mkdir -p "$DATAPACKS_DST"
+    for src in "$DATAPACKS_SRC"/*/; do
+        [ -d "$src" ] || continue
+        name="$(basename "$src")"
+        zip_file="$DATAPACKS_DST/${name}.zip"
+        # Régénère le zip si le source a changé depuis le dernier déploiement.
+        # `find -newer` couvre l'arborescence entière.
+        if [ ! -f "$zip_file" ] || find "$src" -newer "$zip_file" -print -quit 2>/dev/null | grep -q .; then
+            (cd "$src" && zip -qr "$zip_file" . -x "*.swp" -x ".DS_Store")
+            chown 1000:1000 "$zip_file" 2>/dev/null || true
+            echo "📦 [pre-up] Datapack régénéré : $name.zip"
+        fi
+    done
+fi
+
 echo "✅ [pre-up] Répertoires prêts."
