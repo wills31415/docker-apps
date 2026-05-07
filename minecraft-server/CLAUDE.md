@@ -55,23 +55,45 @@ Le jar patché part automatiquement dans `overrides/` du `.mrpack` (son SHA-1 ne
 |---|---|---|
 | [`sophisticatedcore-mathhelper-div0`](./patches/sophisticatedcore-mathhelper-div0/) | `sophisticatedcore-1.20.1-*.jar` | `ArithmeticException: / by zero` au render d'un BackpackScreen / StorageScreen — guard `a==0` ajouté |
 
-## Distribution manuelle aux joueurs
+## Distribution clients (Modrinth Under review)
 
-Tant que l'auto-sync ne marche pas (Modrinth Under review), exposer les jars via le serveur HTTP Dynmap (déjà ouvert en `:25566`, sans auth) :
+Tant que l'auto-sync Modrinth ne marche pas, `sync-pack.sh` distribue automatiquement le `.mrpack` à deux endroits :
+
+- `shared/data/coupaing-craft-initial.mrpack` — fallback local consommé par itzg au boot du serveur.
+- `shared/data/dynmap/web/coupaing-craft.mrpack` — exposé via Dynmap HTTP (`http://<ip>:25566/coupaing-craft.mrpack`) → URL stable pour les clients.
+
+### Sur un client (mode auto via script)
+
+`update-client.sh` télécharge la dernière version depuis l'URL Dynmap, calcule le diff avec le profil local, et touche **uniquement** `mods/` + `resourcepacks/` + `shaderpacks/`. Configs, options, journeymap data et autres préservées.
+
+```bash
+# SteamDeck Flatpak — auto-détecte le profil :
+./update-client.sh
+
+# Override profil :
+./update-client.sh /chemin/vers/profil
+
+# Override URL (autre serveur, fichier local pour test) :
+PACK_URL=http://autre.host:25566/coupaing-craft.mrpack ./update-client.sh
+PACK_URL=file:///chemin/local/pack.mrpack ./update-client.sh
+```
+
+Anciens fichiers déplacés dans `<profil>/.update-backup/<timestamp>/`, jamais supprimés.
+
+### Sur un client (manuel, individuel)
+
+Pour exposer un fichier précis (jar custom, asset isolé), le copier dans `shared/data/dynmap/web/` puis fournir l'URL au joueur. Procédure-type :
 
 ```bash
 cp <chemin-vers-jar> /home/wsl/docker-apps/minecraft-server/shared/data/dynmap/web/
-# Téléchargeable depuis http://<ip-publique>:25566/<nom-fichier>.jar
+# Téléchargeable : http://<ip-publique>:25566/<nom-fichier>.jar
 ```
 
-Procédure-type pour un joueur (SteamDeck Flatpak en exemple) :
+## Configs custom à shipper (`pack-overrides/`)
 
-```bash
-PROFILE="$HOME/.var/app/com.modrinth.theseus/data/ModrinthApp/profiles/CoupaingCraft/mods"
-cd "$PROFILE"
-rm -v <ancien-fichier>.jar
-curl -LO http://<ip>:25566/<nouveau-fichier>.jar
-```
+`sync-pack.sh` n'embarque **plus** automatiquement `<profile>/config/` du master profile dans le `.mrpack` (cause : ModrinthApp ré-extrait `overrides/config/` à chaque update → écrasement des tweaks joueur). YOSBR est inclus pour protéger `options.txt` & co. mais **pas les configs de mods**.
+
+Pour shipper des defaults pack-spécifiques (ex: presets dynmap-public, JEI bookmarks pré-configurés), créer un dossier `<profile>/pack-overrides/` dans le master ; son contenu est embarqué tel quel dans `overrides/` du `.mrpack`. Ne **jamais** y mettre de configs susceptibles d'être tweakées par le joueur.
 
 ## Fichiers clés
 
@@ -79,9 +101,12 @@ curl -LO http://<ip>:25566/<nouveau-fichier>.jar
 minecraft-server/
 ├── CLAUDE.md                         ← ce fichier
 ├── SYNC.md                           ← workflow sync-pack détaillé
-├── sync-pack.sh                      ← édition GUI → upload Modrinth → da restart
+├── sync-pack.sh                      ← édition GUI → upload Modrinth → da restart + auto-dist local
+├── update-client.sh                  ← update du profil ModrinthApp d'un client (SteamDeck) sans toucher aux configs
+├── MODRINTH_BODY.md                  ← description Modrinth (à coller manuellement sur le dashboard)
+├── MODS_VS_FABULOUSLY_OPTIMIZED.md   ← rapport de comparaison FO/CoupaingCraft (régénérable)
 ├── dry-run-pack.mrpack               ← --dry-run output (gitignored)
-├── last-pack.mrpack                  ← --no-upload output (gitignored)
+├── last-pack.mrpack                  ← copie auto du dernier pack généré (gitignored)
 ├── patches/                          ← patchs binaires (versionnés)
 │   └── <patch-name>/
 │       ├── apply.sh

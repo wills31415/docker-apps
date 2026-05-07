@@ -11,28 +11,25 @@ Synchroniser le modpack en une commande : **édition GUI dans Modrinth App → u
 cd ~/docker-apps/minecraft-server
 
 # 1. Édite le pack dans la Modrinth App (profil CoupaingCraft-Master) :
-#    ajout / suppression / MAJ de mod, modification de configs.
+#    ajout / suppression / MAJ de mod ou resource pack.
 # 2. Si une update upstream casse un patch maison, le ré-appliquer :
 #    ./patches/<patch-name>/apply.sh ~/.local/share/ModrinthApp/profiles/CoupaingCraft-Master/mods/<jar>
 # 3. Sync :
 ./sync-pack.sh "ajout du mod XYZ"
-
-# 4. ⚠️ Tant que Modrinth est Under review (cf. § ci-dessous) :
-cp last-pack.mrpack shared/data/coupaing-craft-initial.mrpack
-da restart minecraft-server
 ```
 
 Ce que fait le script :
 
 1. Détecte le profil ModrinthApp local (par défaut `CoupaingCraft-Master`).
-2. Pour chaque `.jar` du dossier `mods/` du profil : SHA-1 → API Modrinth → URL canonique + métadonnées env.
-3. Mods absents de Modrinth (jars patchés, mods custom) → embarqués dans `overrides/mods/` du `.mrpack` (pas d'auto-update).
-4. Configs du profil → embarquées dans `overrides/config/`.
-5. Upload de la nouvelle version sur Modrinth.
-6. `da restart minecraft-server` → itzg détecte la nouvelle version (via `MODRINTH_FORCE_SYNCHRONIZE=true`) et resynchronise.
-7. Les joueurs voient une notif "Update available" dans leur Modrinth App.
-
-⚠️ Étapes 6 et 7 ne marchent qu'**une fois Modrinth approuvé** (cf. § État Modrinth). En attendant : copier `last-pack.mrpack` dans `shared/data/coupaing-craft-initial.mrpack` (le script ne le fait pas auto) + distribuer manuellement les jars aux joueurs (cf. `CLAUDE.md` § Distribution manuelle).
+2. Pour chaque asset du profil (`mods/*.jar`, `resourcepacks/*.zip`, `shaderpacks/*.zip`) : SHA-1 → API Modrinth → URL canonique + métadonnées env.
+3. Assets absents de Modrinth (jars patchés, contenu custom) → embarqués dans `overrides/<dossier>/` du `.mrpack`.
+4. Si un dossier `<profile>/pack-overrides/` existe, son contenu est embarqué tel quel dans `overrides/` (cf. `CLAUDE.md` § Configs custom à shipper). **Les configs `<profile>/config/` du master ne sont PAS embarquées** par défaut, pour éviter d'écraser les tweaks joueurs aux updates.
+5. Auto-distribution locale du `.mrpack` :
+   - `shared/data/coupaing-craft-initial.mrpack` — fallback consommé par itzg.
+   - `shared/data/dynmap/web/coupaing-craft.mrpack` — URL stable pour `update-client.sh`.
+6. Upload de la nouvelle version sur Modrinth.
+7. `da restart minecraft-server` → itzg détecte la nouvelle version (`MODRINTH_FORCE_SYNCHRONIZE=true`) et resynchronise.
+8. Les joueurs voient une notif "Update available" dans leur Modrinth App **une fois Modrinth approuvé**. En attendant : utiliser `update-client.sh` côté joueur (cf. `CLAUDE.md` § Distribution clients).
 
 ## État Modrinth
 
@@ -197,7 +194,7 @@ Si tu poses un `.jar` dans `mods/` du master profile qui n'existe pas sur Modrin
 | HTTP 403 | PAT sans le scope `Create versions` | Régénérer avec les bons scopes |
 | HTTP 429 | Rate limit (300 req/min) | Attendre 1 min |
 | `❌ Doublons de mods` | Deux versions du même project_id dans `mods/` du profil | Supprimer la version obsolète dans la Modrinth App |
-| Le serveur ne resynchronise pas après sync | Toujours en mode `.mrpack` local (Modrinth Under review) | `cp last-pack.mrpack shared/data/coupaing-craft-initial.mrpack && da restart minecraft-server` |
+| Le serveur ne resynchronise pas après sync | (Devrait pas arriver — `sync-pack.sh` copie auto le .mrpack vers `shared/data/coupaing-craft-initial.mrpack`.) | Vérifier le timestamp du fichier ; relancer `da restart minecraft-server` |
 | Crash client `ArithmeticException: / by zero` au render Sophisticated | Patch `sophisticatedcore-mathhelper-div0` perdu après update | Ré-appliquer le patch (cf. § Patches binaires) puis sync |
 
 ## Migration `.env` (à faire après approbation Modrinth)

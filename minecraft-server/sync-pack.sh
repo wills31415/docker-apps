@@ -341,11 +341,27 @@ with zipfile.ZipFile(mrpack_path, "w", zipfile.ZIP_DEFLATED) as z:
     z.writestr("modrinth.index.json", json.dumps(manifest, indent=2))
     for src, target in overrides:
         z.write(src, target)
-    config_dir = profile / "config"
-    if config_dir.is_dir():
-        for f in config_dir.rglob("*"):
+
+    # Le master profile contient les configs perso du mainteneur. ON NE LES EMBARQUE
+    # PAS dans overrides/config/ : ModrinthApp ré-extrait overrides/ à chaque update,
+    # ce qui écraserait les tweaks des joueurs. YOSBR (présent dans le pack) protège
+    # options.txt et quelques autres files, mais pas les configs de mods.
+    # → Fresh install : mods génèrent leurs configs par défaut (sain).
+    # → Update : configs joueur préservées.
+    #
+    # Pour shipper des defaults pack-spécifiques (ex: presets dynmap, JEI bookmarks),
+    # poser les fichiers dans `<profile>/pack-overrides/` du master profile : leur
+    # contenu est embarqué tel quel dans overrides/ du .mrpack (sans préfixe
+    # config/).
+    pack_overrides = profile / "pack-overrides"
+    if pack_overrides.is_dir():
+        n = 0
+        for f in pack_overrides.rglob("*"):
             if f.is_file():
-                z.write(f, f"overrides/config/{f.relative_to(config_dir)}")
+                z.write(f, f"overrides/{f.relative_to(pack_overrides)}")
+                n += 1
+        if n:
+            print(f"  📋 {n} fichier(s) custom embarqué(s) depuis pack-overrides/")
 
 # Décompte par dossier pour le résumé final.
 breakdown = defaultdict(int)
@@ -371,10 +387,23 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   exit 0
 fi
 
+# ─── Distribution locale du pack (hors --dry-run) ───────────────────────────
+# Toujours sauver une copie inspectable + diffuser aux deux endroits attendus :
+#   - shared/data/coupaing-craft-initial.mrpack : utilisé par itzg comme fallback
+#     local tant que le projet Modrinth est en review (cf. SYNC.md § État Modrinth).
+#   - shared/data/dynmap/web/coupaing-craft.mrpack : exposé via Dynmap HTTP pour
+#     update-client.sh sur les machines clientes.
+KEEP_PATH="$SCRIPT_DIR/last-pack.mrpack"
+cp "$MRPACK_PATH" "$KEEP_PATH"
+PACK_LOCAL="$REPO_ROOT/$CLUSTER_NAME/shared/data/coupaing-craft-initial.mrpack"
+PACK_HTTP="$REPO_ROOT/$CLUSTER_NAME/shared/data/dynmap/web/coupaing-craft.mrpack"
+mkdir -p "$(dirname "$PACK_HTTP")"
+cp "$MRPACK_PATH" "$PACK_LOCAL"
+cp "$MRPACK_PATH" "$PACK_HTTP"
+echo "📂 Fallback serveur     : $PACK_LOCAL"
+echo "🌐 Distribution clients : $PACK_HTTP"
+
 if [[ "$NO_UPLOAD" -eq 1 ]]; then
-  # Le pack vit dans WORK_DIR et sera nettoyé par le trap. Le copier pour conservation.
-  KEEP_PATH="$SCRIPT_DIR/last-pack.mrpack"
-  cp "$MRPACK_PATH" "$KEEP_PATH"
   echo "🛑 --no-upload : skip API Modrinth."
   echo "   Pack conservé : $KEEP_PATH"
   exit 0
