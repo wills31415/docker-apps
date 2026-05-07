@@ -1,0 +1,3 @@
+{
+  "enchantment.harvest-enchantment.harvesting.desc": "Clic-droit avec une houe enchantée sur une culture mature pour la récolter et la replanter. Chaque niveau élargit la zone de récolte d'1 bloc de rayon (niveau max 3 — configurable côté serveur)."
+}

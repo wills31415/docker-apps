@@ -165,6 +165,25 @@ get_token() {
 PROFILE_DIR="$(detect_profile)"
 echo "📁 Profil ModrinthApp : $PROFILE_DIR"
 
+# ─── Auto-build des resource packs maison ───────────────────────────────────
+# Sources raw versionnées dans <repo>/minecraft-server/resourcepacks/<name>/
+# → zippées dans <master>/resourcepacks/<name>.zip (idempotent : régénère
+# uniquement si une source est plus récente que le zip).
+RP_SRC_DIR="$SCRIPT_DIR/resourcepacks"
+if [[ -d "$RP_SRC_DIR" ]]; then
+    RP_DST_DIR="$PROFILE_DIR/resourcepacks"
+    mkdir -p "$RP_DST_DIR"
+    for src in "$RP_SRC_DIR"/*/; do
+        [[ -d "$src" ]] || continue
+        rp_name="$(basename "$src")"
+        rp_zip="$RP_DST_DIR/${rp_name}.zip"
+        if [[ ! -f "$rp_zip" ]] || find "$src" -newer "$rp_zip" -print -quit 2>/dev/null | grep -q .; then
+            (cd "$src" && zip -qr "$rp_zip" . -x "*.swp" -x ".DS_Store")
+            echo "  📦 Resource pack régénéré : $rp_name.zip"
+        fi
+    done
+fi
+
 TOKEN=""
 if [[ "$NO_UPLOAD" -eq 0 ]]; then
   if ! TOKEN="$(get_token)"; then
