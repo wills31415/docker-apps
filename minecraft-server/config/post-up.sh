@@ -11,12 +11,15 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Charger les valeurs depuis .env pour afficher les bonnes infos.
-if [ -f "$SCRIPT_DIR/.env" ]; then
-    # Charger uniquement les variables non-commentées.
-    set -a
-    source <(grep -v '^\s*#' "$SCRIPT_DIR/.env" | grep -v '^\s*$')
-    set +a
-fi
+# .env.local (gitignored, optionnel) écrase les valeurs de .env — même contrat
+# que docker-compose.yaml.
+for env_file in "$SCRIPT_DIR/.env" "$SCRIPT_DIR/.env.local"; do
+    if [ -f "$env_file" ]; then
+        set -a
+        source <(grep -v '^\s*#' "$env_file" | grep -v '^\s*$')
+        set +a
+    fi
+done
 
 # Valeurs par défaut si non définies dans .env.
 SERVER_PORT="${SERVER_PORT:-25565}"

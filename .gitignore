@@ -3,6 +3,9 @@
 .DS_Store
 .claude/
 
+# Overrides de config personnels (OPS, mots de passe, etc.) — non-versionnés
+/*/config/.env.local
+
 # sync-pack.sh artefacts (build .mrpack locaux)
 /*/dry-run-pack.mrpack
 /*/last-pack.mrpack

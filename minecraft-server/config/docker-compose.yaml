@@ -50,8 +50,13 @@ services:
     stdin_open: true
 
     # Charger toutes les variables de configuration depuis le fichier .env.
+    # .env.local (gitignored, optionnel) permet d'overrider les valeurs de .env
+    # pour des configs personnelles non-versionnées (OPS, RCON_PASSWORD, etc.).
+    # Compose lit les fichiers dans l'ordre — le second écrase le premier.
     env_file:
       - .env
+      - path: .env.local
+        required: false
 
     # Variables critiques hardcodées ici (ne doivent jamais être retirées) :
     environment:

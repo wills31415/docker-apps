@@ -100,6 +100,22 @@ minecraft-server/
     └── dynmap-auto-render.{pid,log}  ← lifecycle géré par les hooks
 ```
 
+## Configs personnelles (`.env.local`)
+
+Pour garder des valeurs perso non-versionnées (pseudo OP, mot de passe RCON custom, etc.) sans pourrir le `.env` template :
+
+```bash
+# config/.env.local — gitignored, lu après .env, écrase ses valeurs.
+OPS=TonPseudoMinecraft
+RCON_PASSWORD=mon-secret-fort
+```
+
+Lu automatiquement par :
+- `docker-compose.yaml` (deuxième `env_file`, `required: false`)
+- `post-up.sh` (boucle `.env` puis `.env.local`)
+
+`sync-pack.sh` ne lit que `.env` (pour `VERSION` / `FABRIC_LOADER_VERSION`) — c'est intentionnel : la version Minecraft n'a pas vocation à être perso.
+
 ## RCON
 
 ```bash
