@@ -26,26 +26,51 @@
 set -euo pipefail
 
 PACK_URL="${PACK_URL:-http://90.79.99.178:25566/coupaing-craft.mrpack}"
-PACK_NAME="${PACK_NAME:-CoupaingCraft}"
+# PACK_NAME peut être explicitement passé (ex : PACK_NAME=AutreProfil ./update-client.sh).
+# Sinon, on teste plusieurs noms de profil courants — l'historique des imports
+# successifs a laissé des profils nommés différemment (manifest.name, filename
+# du .mrpack au moment de l'import, etc.).
+PACK_NAMES_DEFAULT=("CoupaingCraft" "coupaing-craft" "pack")
+if [[ -n "${PACK_NAME:-}" ]]; then
+  PACK_NAMES=("$PACK_NAME")
+else
+  PACK_NAMES=("${PACK_NAMES_DEFAULT[@]}")
+fi
+
+# Racines ModrinthApp possibles (Flatpak SteamDeck, Linux natif, Windows).
+PROFILES_ROOTS=(
+  "$HOME/.var/app/com.modrinth.theseus/data/ModrinthApp/profiles"  # Flatpak (SteamDeck/Linux)
+  "$HOME/.local/share/ModrinthApp/profiles"                          # Linux native
+  "$HOME/.config/ModrinthApp/profiles"                               # Linux config-style
+  "${APPDATA:-}/ModrinthApp/profiles"                                # Windows (Cygwin/Git Bash)
+)
 
 detect_profile() {
-  local candidates=(
-    "$HOME/.var/app/com.modrinth.theseus/data/ModrinthApp/profiles/$PACK_NAME"  # Flatpak (SteamDeck/Linux)
-    "$HOME/.local/share/ModrinthApp/profiles/$PACK_NAME"                          # Linux native
-    "$HOME/.config/ModrinthApp/profiles/$PACK_NAME"                               # Linux config-style
-    "${APPDATA:-}/ModrinthApp/profiles/$PACK_NAME"                                # Windows (Cygwin/Git Bash)
-  )
-  local c
-  for c in "${candidates[@]}"; do
-    [[ -n "$c" && -d "$c" ]] && { printf '%s' "$c"; return 0; }
+  local root name
+  for root in "${PROFILES_ROOTS[@]}"; do
+    [[ -n "$root" && -d "$root" ]] || continue
+    for name in "${PACK_NAMES[@]}"; do
+      if [[ -d "$root/$name" ]]; then
+        printf '%s' "$root/$name"
+        return 0
+      fi
+    done
   done
   return 1
 }
 
 PROFILE="${1:-$(detect_profile || true)}"
 if [[ -z "${PROFILE:-}" || ! -d "$PROFILE" ]]; then
-  echo "❌ Profil ModrinthApp '$PACK_NAME' introuvable." >&2
-  echo "   Spécifier en argument : $0 /chemin/vers/profile" >&2
+  {
+    echo "❌ Profil ModrinthApp introuvable."
+    echo "   Noms testés : ${PACK_NAMES[*]}"
+    echo "   Profils disponibles :"
+    for root in "${PROFILES_ROOTS[@]}"; do
+      [[ -n "$root" && -d "$root" ]] || continue
+      find "$root" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sed 's|^|     - |'
+    done
+    echo "   Override : $0 /chemin/vers/profile  ou  PACK_NAME=NomDuProfil $0"
+  } >&2
   exit 1
 fi
 echo "📁 Profil : $PROFILE"
