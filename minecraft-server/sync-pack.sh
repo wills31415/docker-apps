@@ -222,10 +222,6 @@ ua             = os.environ["USER_AGENT"]
 server_only    = {s.strip() for s in os.environ.get("SERVER_ONLY_PROJECTS", "").split(",") if s.strip()}
 client_required = {s.strip() for s in os.environ.get("CLIENT_REQUIRED_PROJECTS", "").split(",") if s.strip()}
 
-mods_dir = profile / "mods"
-if not mods_dir.is_dir():
-    sys.exit(f"❌ Pas de dossier mods/ dans {profile}")
-
 def hashes(path):
     sha1, sha512, size = hashlib.sha1(), hashlib.sha512(), 0
     with path.open("rb") as fh:
@@ -243,58 +239,81 @@ def fetch_json(url):
             return None
         raise
 
-jars = sorted(mods_dir.glob("*.jar"))
-if not jars:
-    sys.exit(f"❌ Aucun .jar dans {mods_dir}")
+# Types d'assets scannés dans le profil (en plus de overrides/config/).
+# `fallback_env=None` → utilise la métadata Modrinth (client_side/server_side) du projet.
+# Pour les resource packs / shader packs, l'env est forcé : pure client-side.
+ASSET_TYPES = [
+    ("mods",          "*.jar", None),
+    ("resourcepacks", "*.zip", {"client": "required", "server": "unsupported"}),
+    ("shaderpacks",   "*.zip", {"client": "optional", "server": "unsupported"}),
+]
 
-disabled = sorted(mods_dir.glob("*.jar.disabled"))
-if disabled:
-    print(f"  ⏸️  {len(disabled)} mod(s) désactivé(s) (ignorés) :")
-    for d in disabled:
-        print(f"       - {d.name}")
-
-files, overrides_jars = [], []
+files, overrides = [], []  # overrides : liste de (Path source, str path-in-zip)
 seen_projects = defaultdict(list)
+total_assets = 0
 
-for jar in jars:
-    sha1, _, _ = hashes(jar)
-    print(f"  🔍 {jar.name}", flush=True)
-
-    version_info = fetch_json(f"https://api.modrinth.com/v2/version_file/{sha1}?algorithm=sha1")
-    if version_info is None:
-        print( "    ⚠️  Pas sur Modrinth → overrides/")
-        overrides_jars.append(jar)
+for folder, glob_pat, fallback_env in ASSET_TYPES:
+    asset_dir = profile / folder
+    if not asset_dir.is_dir():
+        continue
+    items = sorted(asset_dir.glob(glob_pat))
+    if not items:
         continue
 
-    project_id = version_info["project_id"]
-    project    = fetch_json(f"https://api.modrinth.com/v2/project/{project_id}") or {}
-    slug       = project.get("slug") or project_id
-    seen_projects[project_id].append((jar.name, slug))
+    # Détection des assets désactivés (ModrinthApp suffixe .disabled).
+    if folder == "mods":
+        disabled = sorted(asset_dir.glob("*.jar.disabled"))
+        if disabled:
+            print(f"  ⏸️  {len(disabled)} mod(s) désactivé(s) (ignorés) :")
+            for d in disabled:
+                print(f"       - {d.name}")
 
-    server_side = project.get("server_side", "required")
-    client_side = project.get("client_side", "required")
-    env = {
-        "client": "required" if client_side != "unsupported" else "unsupported",
-        "server": "required" if server_side != "unsupported" else "unsupported",
-    }
-    if client_side == "optional": env["client"] = "optional"
-    if server_side == "optional": env["server"] = "optional"
+    for item in items:
+        sha1, _, _ = hashes(item)
+        print(f"  🔍 {folder}/{item.name}", flush=True)
+        total_assets += 1
 
-    if slug in server_only or project_id in server_only:
-        env = {"client": "unsupported", "server": "required"}
-        print(f"    🛡️  forced server-only ({slug})")
-    elif slug in client_required or project_id in client_required:
-        env = {"client": "required", "server": "required"}
-        print(f"    📌 forced client-required ({slug})")
+        version_info = fetch_json(f"https://api.modrinth.com/v2/version_file/{sha1}?algorithm=sha1")
+        if version_info is None:
+            print( "    ⚠️  Pas sur Modrinth → overrides/")
+            overrides.append((item, f"overrides/{folder}/{item.name}"))
+            continue
 
-    primary = next((f for f in version_info["files"] if f.get("primary")), version_info["files"][0])
-    files.append({
-        "path": f"mods/{jar.name}",
-        "hashes": {"sha1": primary["hashes"]["sha1"], "sha512": primary["hashes"]["sha512"]},
-        "env": env,
-        "downloads": [primary["url"]],
-        "fileSize": primary["size"],
-    })
+        project_id = version_info["project_id"]
+        project    = fetch_json(f"https://api.modrinth.com/v2/project/{project_id}") or {}
+        slug       = project.get("slug") or project_id
+        seen_projects[project_id].append((item.name, slug))
+
+        if fallback_env is not None:
+            env = dict(fallback_env)
+        else:
+            server_side = project.get("server_side", "required")
+            client_side = project.get("client_side", "required")
+            env = {
+                "client": "required" if client_side != "unsupported" else "unsupported",
+                "server": "required" if server_side != "unsupported" else "unsupported",
+            }
+            if client_side == "optional": env["client"] = "optional"
+            if server_side == "optional": env["server"] = "optional"
+
+            if slug in server_only or project_id in server_only:
+                env = {"client": "unsupported", "server": "required"}
+                print(f"    🛡️  forced server-only ({slug})")
+            elif slug in client_required or project_id in client_required:
+                env = {"client": "required", "server": "required"}
+                print(f"    📌 forced client-required ({slug})")
+
+        primary = next((f for f in version_info["files"] if f.get("primary")), version_info["files"][0])
+        files.append({
+            "path": f"{folder}/{item.name}",
+            "hashes": {"sha1": primary["hashes"]["sha1"], "sha512": primary["hashes"]["sha512"]},
+            "env": env,
+            "downloads": [primary["url"]],
+            "fileSize": primary["size"],
+        })
+
+if total_assets == 0:
+    sys.exit(f"❌ Aucun asset (mods/, resourcepacks/, shaderpacks/) dans {profile}")
 
 dupes = {pid: items for pid, items in seen_projects.items() if len(items) > 1}
 if dupes:
@@ -320,15 +339,25 @@ manifest = {
 mrpack_path.parent.mkdir(parents=True, exist_ok=True)
 with zipfile.ZipFile(mrpack_path, "w", zipfile.ZIP_DEFLATED) as z:
     z.writestr("modrinth.index.json", json.dumps(manifest, indent=2))
-    for jar in overrides_jars:
-        z.write(jar, f"overrides/mods/{jar.name}")
+    for src, target in overrides:
+        z.write(src, target)
     config_dir = profile / "config"
     if config_dir.is_dir():
         for f in config_dir.rglob("*"):
             if f.is_file():
                 z.write(f, f"overrides/config/{f.relative_to(config_dir)}")
 
-print(f"✅ {len(files)} mod(s) Modrinth, {len(overrides_jars)} en overrides → {mrpack_path}")
+# Décompte par dossier pour le résumé final.
+breakdown = defaultdict(int)
+for f in files:
+    breakdown[f["path"].split("/", 1)[0]] += 1
+for _, target in overrides:
+    parts = target.split("/", 2)
+    if len(parts) >= 2 and parts[0] == "overrides":
+        breakdown[f"overrides/{parts[1]}"] += 1
+detail = ", ".join(f"{n} {k}" for k, n in sorted(breakdown.items()))
+print(f"✅ {len(files)} asset(s) Modrinth, {len(overrides)} en overrides → {mrpack_path}")
+print(f"   Détail : {detail}")
 PYEOF
 
 echo ""
