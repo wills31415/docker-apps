@@ -1,41 +1,103 @@
-# CLAUDE.md — minecraft-server
+# CLAUDE.md — Modpack `coupaing-craft`
 
-Guide spécifique au cluster `minecraft-server`. Le `CLAUDE.md` racine couvre la mécanique commune des clusters `da`.
+Toute session Claude dans `minecraft-server/` est centrée sur la **maintenance et la gestion du modpack CoupaingCraft**. La mécanique commune des clusters `da` (start/stop, hooks, etc.) vit dans le `CLAUDE.md` racine.
 
-## Stack
+## Stack actuelle
 
-- Image : `itzg/minecraft-server:latest`
-- Type : `MODRINTH` (Fabric)
-- Version : Minecraft `1.21.11`, Fabric loader `0.19.2`
-- Modpack : projet Modrinth `coupaing-craft` (slug). Tant que Modrinth n'a pas approuvé le projet (Under review initial), `.env` reste sur le fallback local `MODRINTH_MODPACK=/data/coupaing-craft-initial.mrpack`. Workflow d'édition : `./sync-pack.sh` (cf. `SYNC.md`).
-- Mods perf ajoutés par-dessus le pack : `c2me-fabric`, `krypton`
-- Carte web : Dynmap (mod) sur l'hôte `DYNMAP_PORT` (25566) → container 8123
+| | |
+|---|---|
+| Minecraft | **1.20.1** (Fabric loader **0.19.2**) |
+| Modpack | `coupaing-craft` (Modrinth, Project ID `4fBwVYft`, **Unlisted**) |
+| Source de vérité | profil ModrinthApp local **`CoupaingCraft-Master`** |
+| Image | `itzg/minecraft-server:stable-java21` (Java 21) |
+| Pipeline d'édition | `./sync-pack.sh` (cf. [`SYNC.md`](./SYNC.md)) |
+| Carte web | Dynmap mod, port hôte `25566` (8123 dans le container) |
 
-## Ports
+⚠️ La version Minecraft a été migrée de `1.21.11` → `1.20.1` pour bénéficier de l'écosystème complet **Create-Fabric 0.5.1-j** + addons. La valeur par défaut `GAME_VERSION:=1.21.11` dans `sync-pack.sh` n'est qu'un fallback : le script lit `VERSION=` du `.env` à l'exécution.
 
-| Port hôte | Cible | Usage |
+## État Modrinth
+
+Le projet est encore **Under review** (l'API publique répond `404` sur `/v2/project/coupaing-craft`). Tant que l'approbation n'est pas reçue :
+
+- Le serveur charge le pack via fallback local : `MODRINTH_MODPACK=/data/coupaing-craft-initial.mrpack`.
+- `sync-pack.sh` upload bien sur Modrinth (l'auth + l'écriture marchent même en review), mais ne **met pas à jour** le `.mrpack` local automatiquement → après un sync, copier manuellement `last-pack.mrpack` vers `shared/data/coupaing-craft-initial.mrpack` si on veut que le serveur prenne les nouveaux mods (le script déclenche `da restart` mais lit l'ancien fichier sans cette copie).
+- Les ModrinthApp clients (joueurs distants) ne reçoivent pas la notif "Update available" → distribution manuelle des jars (cf. § Distribution manuelle aux joueurs).
+
+Migration vers le mode "slug + auto-sync" (`MODRINTH_MODPACK=coupaing-craft` + `MODRINTH_VERSION_TYPE=release`) documentée dans [`SYNC.md`](./SYNC.md), à faire dès l'approbation reçue.
+
+## Profils ModrinthApp
+
+Deux profils sur la machine locale (Kubuntu) :
+
+| Profil | Path | Rôle |
 |---|---|---|
-| `SERVER_PORT` (25565) | 25565 | Joueurs Minecraft |
-| `RCON_PORT` (25575) | 25575 | RCON — **ne pas** ouvrir en NAT/PAT |
-| `DYNMAP_PORT` (25566) | 8123 | Carte web — ouvrable en NAT/PAT, **pas d'auth par défaut** |
+| `CoupaingCraft-Master` | `~/.local/share/ModrinthApp/profiles/CoupaingCraft-Master/` | Source de vérité, **unlinked** du pack Modrinth. Contient les mods server-only (`{client: unsupported}`) en plus des mods client. **Seul profil édité** — `sync-pack.sh` lit ses jars + configs. |
+| `CoupaingCraft` | `~/.local/share/ModrinthApp/profiles/CoupaingCraft/` | Profil "joueur" — installé via le pack Modrinth (filtre auto les server-only). Sert à tester comme un client. **Ne pas éditer** (sera écrasé à chaque update du pack). |
+
+⚠️ **Ne jamais relinker `CoupaingCraft-Master` au pack** — le filtre client de l'App retirerait les server-only et casserait la prochaine sync.
+
+## Patches
+
+Le dossier [`patches/`](./patches/) contient des patchs binaires sur les mods upstream non fixés en amont. Chaque sous-dossier a un `apply.sh` idempotent + un `README.md` explicatif.
+
+À ré-appliquer **après chaque update upstream** du mod concerné, depuis le profil master :
+
+```bash
+./patches/sophisticatedcore-mathhelper-div0/apply.sh \
+  ~/.local/share/ModrinthApp/profiles/CoupaingCraft-Master/mods/sophisticatedcore-*.jar
+```
+
+Le jar patché part automatiquement dans `overrides/` du `.mrpack` (son SHA-1 ne matche plus celui de Modrinth) → préservé à chaque cycle `sync-pack`.
+
+### Patches actifs
+
+| Patch | Cible | Symptôme fixé |
+|---|---|---|
+| [`sophisticatedcore-mathhelper-div0`](./patches/sophisticatedcore-mathhelper-div0/) | `sophisticatedcore-1.20.1-*.jar` | `ArithmeticException: / by zero` au render d'un BackpackScreen / StorageScreen — guard `a==0` ajouté |
+
+## Distribution manuelle aux joueurs
+
+Tant que l'auto-sync ne marche pas (Modrinth Under review), exposer les jars via le serveur HTTP Dynmap (déjà ouvert en `:25566`, sans auth) :
+
+```bash
+cp <chemin-vers-jar> /home/wsl/docker-apps/minecraft-server/shared/data/dynmap/web/
+# Téléchargeable depuis http://<ip-publique>:25566/<nom-fichier>.jar
+```
+
+Procédure-type pour un joueur (SteamDeck Flatpak en exemple) :
+
+```bash
+PROFILE="$HOME/.var/app/com.modrinth.theseus/data/ModrinthApp/profiles/CoupaingCraft/mods"
+cd "$PROFILE"
+rm -v <ancien-fichier>.jar
+curl -LO http://<ip>:25566/<nouveau-fichier>.jar
+```
 
 ## Fichiers clés
 
 ```
 minecraft-server/
+├── CLAUDE.md                         ← ce fichier
+├── SYNC.md                           ← workflow sync-pack détaillé
+├── sync-pack.sh                      ← édition GUI → upload Modrinth → da restart
+├── dry-run-pack.mrpack               ← --dry-run output (gitignored)
+├── last-pack.mrpack                  ← --no-upload output (gitignored)
+├── patches/                          ← patchs binaires (versionnés)
+│   └── <patch-name>/
+│       ├── apply.sh
+│       ├── README.md
+│       └── *.java                    ← sources des classes patchées
 ├── config/
-│   ├── .env                       ← TOUTE la config (mods, mémoire, gameplay, RCON, Dynmap)
-│   ├── docker-compose.yaml        ← Services + ports + volume ../shared/data:/data
-│   ├── pre-up.sh                  ← mkdir shared/{data,backups}
-│   ├── post-up.sh                 ← Affiche infos + démarre le watcher Dynmap
-│   ├── pre-down.sh                ← Tue le watcher Dynmap (PID dans shared/)
-│   └── dynmap-auto-render.sh      ← Daemon de force-render autour des joueurs posés
-└── shared/                        ← bind mount, gitignored
-    ├── data/                      ← /data du container (monde, mods, configs)
-    │   └── dynmap/                ← Config + tuiles + web overrides Dynmap
-    ├── backups/
-    ├── dynmap-auto-render.pid     ← PID du watcher (lifecycle géré par les hooks)
-    └── dynmap-auto-render.log     ← Logs du watcher
+│   ├── .env                          ← VERSION, mods, RCON, Dynmap, OPS
+│   ├── docker-compose.yaml           ← services + ports + bind ../shared/data:/data
+│   ├── pre-up.sh / post-up.sh        ← hooks lifecycle (lance le watcher Dynmap)
+│   ├── pre-down.sh                   ← arrête le watcher (PID dans shared/)
+│   ├── dynmap-auto-render.sh         ← daemon force-render autour des joueurs posés
+│   └── dynmap-grave-marker.sh        ← (DÉSACTIVÉ en 1.20.1, voir post-up.sh)
+└── shared/                           ← bind mount, gitignored
+    ├── data/                         ← /data du container (monde, mods, config Dynmap, .mrpack local)
+    ├── backups/                      ← snapshots manuels du monde
+    └── dynmap-auto-render.{pid,log}  ← lifecycle géré par les hooks
 ```
 
 ## RCON
@@ -45,10 +107,10 @@ minecraft-server/
 docker exec -it minecraft_server rcon-cli
 
 # Commande unique
-docker exec minecraft_server rcon-cli <cmd>
+docker exec minecraft_server rcon-cli "<cmd>"
 ```
 
-Gotcha : les coordonnées négatives sont parsées comme des flags par `rcon-cli`. **Toujours quoter** la commande complète :
+⚠️ **Toujours quoter** la commande complète, sinon les coordonnées négatives sont parsées comme des flags :
 
 ```bash
 # KO : unknown shorthand flag
@@ -57,96 +119,70 @@ docker exec minecraft_server rcon-cli dynmap radiusrender world -23 23 256
 docker exec minecraft_server rcon-cli "dynmap radiusrender world -23 23 256"
 ```
 
-## Règles mods (MODRINTH)
-
-- `REMOVE_OLD_MODS=true` → tout mod retiré de `MODRINTH_PROJECTS`/pack disparaît au prochain démarrage. `MODRINTH_EXCLUDE_FILES` est la seule barrière contre les mods client-only embarqués dans le pack.
-- **Vérifier le client/serveur split AVANT d'exclure**. Depuis MC 1.21.2 les recettes vivent côté serveur → `jei` / `rei` / `emi` doivent être présents côté serveur. Ne pas les mettre dans `MODRINTH_EXCLUDE_FILES`.
-- Les mods perf ajoutés (`c2me-fabric`, `krypton`) sont compatibles `VIEW_DISTANCE` élevé. Lithium et FerriteCore viennent du pack.
-- Pour ajouter un mod : `MODRINTH_PROJECTS=...,nouveau-slug` puis `da restart minecraft-server`.
-
-### Workflow `sync-pack` (édition GUI → publication Modrinth → resync auto)
-
-`./sync-pack.sh "msg"` à la racine du cluster : prend le profil de la **Modrinth App locale** (Kubuntu) comme source de vérité, le packe en `.mrpack`, l'upload sur Modrinth (projet unlisted), puis `da restart`. Voir [`SYNC.md`](./SYNC.md) pour le setup, les flags (`--dry-run`, `--no-upload`, `--no-deploy`) et les paliers de validation.
-
-⚠️ Tant que le palier B (upload OK) n'est pas validé, le `.env` reste en mode `.mrpack` local. La migration vers `MODRINTH_MODPACK=<slug> + MODRINTH_FORCE_SYNCHRONIZE=true` est documentée dans `SYNC.md`.
-
 ## Dynmap
 
-### Config principale : `shared/data/dynmap/configuration.txt`
+### Mapping monde
 
-Réglages non-évidents posés cette session :
-- `update-webpath-files: false` — sinon Dynmap écrase `web/` au démarrage et nos overrides UI sautent.
-- `webpage-title: "Carte du serveur"`, `sidebaropened: pinned`, `hideifspectator: true`.
-- `deftemplatesuffix: lowres` — évite le iso hires qui laissait des trous visibles.
-- Throttling agressif (`tileupdatedelay: 1`, `save-pending-period: 60`, `tiles-rendered-at-once: 4`, `parallelrendercnt: 2`, `per-tick-time-limit: 80`, `maxchunkspertick: 400`, etc.).
-
-### Limitations Dynmap-Fabric à connaître
-
-- **Pas de commande `dynmap reload`** sur Fabric. Toute modif de `configuration.txt` / `worlds.txt` / `markers.yml` → `da restart minecraft-server`.
-- **Triggers supportés** : `blockupdate` et `chunkgenerate` uniquement. **Pas de `chunkload`**. Conséquence : un joueur qui traverse des chunks déjà générés ne déclenche aucun rendu → trous sur la carte. C'est ce que compense le watcher.
-- Vérifier les triggers actifs : `rcon-cli dynmap triggerstats`.
-
-### Mapping monde ↔ Dynmap
-
-| Dimension MC | Dossier monde | Map name dans Dynmap |
+| Dimension MC | Dossier monde | Map Dynmap |
 |---|---|---|
-| `minecraft:overworld` | `world` | `surface` (et `flat`, `cave`) |
+| `minecraft:overworld` | `world` | `surface`, `flat`, `cave` |
 | `minecraft:the_nether` | `DIM-1` | `nether` |
 | `minecraft:the_end` | `DIM1` | `the_end` |
 
-Commandes utiles :
-```bash
-# Render forcé autour d'un point
-rcon-cli "dynmap radiusrender world 100 -200 512"
-# Stats / queue
-rcon-cli "dynmap stats"
-rcon-cli "dynmap purgequeue"
-# Purge des tuiles d'une map (attention : pas de retour en arrière)
-rcon-cli "dynmap purgemap world surface"
-```
+Mods Create ajoutent `create_dd_ponder` (dimension interne au système Ponder de Create: Dreams & Desires) — désactivée dans `worlds.txt` (inutile pour les joueurs).
+
+### Limitations Fabric
+
+- **Pas de `dynmap reload`** → modif `configuration.txt` / `worlds.txt` / `markers.yml` ⇒ `da restart`.
+- **Triggers actifs** : `blockupdate` + `chunkgenerate` uniquement. **Pas de `chunkload`** → un joueur qui traverse des chunks pré-générés ne déclenche aucun rendu. Compensé par `dynmap-auto-render.sh`.
+
+### Watcher `dynmap-auto-render`
+
+Daemon bash (`config/dynmap-auto-render.sh`) lancé par `post-up.sh`, tué par `pre-down.sh` via `shared/dynmap-auto-render.pid`. Toutes les `POLL_INTERVAL=30s`, lit la position des joueurs via RCON, regroupe ceux qui sont posés (déplacement < `MOVEMENT_THRESHOLD=32` blocs), et déclenche `dynmap radiusrender` sur le centroïde (rayon `BASE_RADIUS=192 + (n-1)*PER_PLAYER_BONUS=64`, cooldown `300s` par grille `64`).
+
+Tunables via env (export avant `da up`) : `POLL_INTERVAL`, `MOVEMENT_THRESHOLD`, `CLUSTER_DISTANCE`, `BASE_RADIUS`, `PER_PLAYER_BONUS`, `COOLDOWN_SEC`, `COOLDOWN_GRID`.
+
+Logs : `tail -f shared/dynmap-auto-render.log`.
 
 ### Overrides UI web
 
-Fichiers vivants dans `shared/data/dynmap/web/` (gitignored car `shared/`) :
-- `index.html` — patché : `<link>` vers `css/override.css` activé + snippet JS qui déplace la compass dans `.leaflet-top.leaflet-left` pour qu'elle s'aligne avec les contrôles natifs.
-- `css/override.css` — tweaks tactiles (`@media (max-width: 900px)` : 17px texte, 44px tap targets, hitbar 48px, etc.) + reset positionnel pour la compass déplacée.
+Vivants dans `shared/data/dynmap/web/` (gitignored car `shared/`) :
+- `index.html` patché : `<link>` vers `css/override.css` + JS qui replace la compass dans `.leaflet-top.leaflet-left`.
+- `css/override.css` : tweaks tactiles (`@media (max-width: 900px)`).
+- `update-webpath-files: false` dans `configuration.txt` → sinon Dynmap écrase nos overrides au démarrage.
 
-Ces overrides ne sont **pas versionnés** (sont dans `shared/`). Une réorg pour les déplacer dans `config/dynmap-web-overrides/` + copy hook reste à faire (cf. mémoire conversation).
-
-## Watcher dynmap-auto-render
-
-`config/dynmap-auto-render.sh` — daemon bash lancé par `post-up.sh`, tué par `pre-down.sh` via `shared/dynmap-auto-render.pid`.
-
-Logique : toutes les `POLL_INTERVAL=30s`, lit la position des joueurs via RCON, détecte ceux qui sont "posés" (déplacement < `MOVEMENT_THRESHOLD=32` blocs sur 2 polls consécutifs), les regroupe à `CLUSTER_DISTANCE=128`, et déclenche `dynmap radiusrender` au centroïde avec rayon `BASE_RADIUS=192 + (n-1)*PER_PLAYER_BONUS=64`. Cooldown 300s par zone (grille 64).
-
-Tuner via env avant `da up` (ou export dans le shell qui lance le watcher) :
-```
-POLL_INTERVAL MOVEMENT_THRESHOLD CLUSTER_DISTANCE
-BASE_RADIUS PER_PLAYER_BONUS
-COOLDOWN_SEC COOLDOWN_GRID
-```
-
-Logs : `tail -f minecraft-server/shared/dynmap-auto-render.log`.
+À déplacer un jour vers `config/dynmap-web-overrides/` + copy hook pour les rendre versionnables.
 
 ## Wipe de monde (garder mods + configs)
 
-Procédure utilisée cette session pour repartir from scratch sans réinstaller les mods :
-
 ```bash
 da down minecraft-server
-# Depuis shared/data/, supprimer : world/, world_nether/, world_the_end/,
-# usercache.json, ops.json, banned-*.json, whitelist.json, logs/, crash-reports/.
-# Garder : mods/, config/, libraries/, *.mrpack, eula.txt, server.properties (sera regen).
+# Dans shared/data/, supprimer :
+#   world/, world_nether/, world_the_end/,
+#   usercache.json, ops.json, banned-*.json, whitelist.json,
+#   logs/, crash-reports/.
+# Garder :
+#   mods/, config/, libraries/, *.mrpack, eula.txt
+#   (server.properties sera regénéré).
 da up minecraft-server
 ```
 
 `REMOVE_OLD_MODS=true` ne touche que `mods/` (resync depuis le pack), pas le monde.
 
-## Gotchas récap
+## Gotchas — modpack & maintenance
 
-- Coords négatives en RCON → quoter la commande complète.
-- Modif config Dynmap → `da restart`, pas de `dynmap reload`.
-- Mod ajouté à `MODRINTH_EXCLUDE_FILES` puis besoin de le réintroduire → ne pas oublier de retirer aussi de l'exclude.
-- `shared/` est gitignored : tout ce qui doit survivre à un wipe de `shared/` (overrides web, configs custom) doit être trackable depuis `config/`.
-- Le port 25575 (RCON) ne doit **jamais** être ouvert sur Internet — accès admin total au serveur.
-- Le port 25566 (Dynmap) n'a pas d'auth — soit reverse proxy, soit `webpassword-protected: true` dans `configuration.txt` si on veut restreindre.
+- **Patcher SophisticatedCore après chaque update upstream** — bug `intMaxCappedMultiply` div/0 non fixé en amont (Forge/NeoForge/Fabric). Trigger : items à `maxStackSize=0` (souvent générés par mods Polymer comme `moretools`) ou état NBT particulier d'un coffre.
+- **Cohérence VERSION** : `.env` (`VERSION=1.20.1`) est la source. `sync-pack.sh` a un fallback statique à `1.21.11` mais lit `.env` au runtime — ne pas se fier au commentaire.
+- **Mods retirés du pack disparaissent** au prochain `da restart` (`REMOVE_OLD_MODS=true`). `MODRINTH_EXCLUDE_FILES` est la seule barrière contre les mods client-only embarqués qui plantent côté serveur.
+- **Vérifier client/serveur split avant d'exclure** un mod. Depuis MC 1.21.2 les recettes vivent côté serveur → `jei` / `rei` / `emi` doivent être présents côté serveur ; **ne pas** les mettre dans `MODRINTH_EXCLUDE_FILES`. (Note : on est en 1.20.1, mais le piège est documenté pour la prochaine migration.)
+- **Polymer + Sophisticated** : items générés par Polymer (`moretools`, autres) peuvent avoir des propriétés exotiques qui font crasher Sophisticated. Le patch `sophisticatedcore-mathhelper-div0` couvre le cas div/0, mais d'autres incompats peuvent surgir.
+- **Coords négatives en RCON** → quoter la commande complète.
+- **Modrinth API 404 sur le projet** = encore en review. Pas de notif joueur, distribution manuelle obligatoire.
+- **RCON port 25575** ne doit **jamais** être ouvert sur Internet (admin total).
+- **Dynmap port 25566** n'a pas d'auth — soit reverse proxy, soit `webpassword-protected: true` dans `configuration.txt`.
+
+## Pointeurs externes
+
+- Workflow `sync-pack` détaillé, paliers de validation, troubleshooting upload : [`SYNC.md`](./SYNC.md)
+- Mécanique commune `da` (lifecycle, hooks, conventions volumes) : `../CLAUDE.md`
+- Patchs binaires détaillés : `patches/<nom>/README.md`
