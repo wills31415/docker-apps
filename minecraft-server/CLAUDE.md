@@ -64,7 +64,7 @@ Tant que l'auto-sync Modrinth ne marche pas, `sync-pack.sh` distribue automatiqu
 
 ### Sur un client (mode auto via script)
 
-`update-client.sh` télécharge la dernière version depuis l'URL Dynmap, calcule le diff avec le profil local, et touche **uniquement** `mods/` + `resourcepacks/` + `shaderpacks/`. Configs, options, journeymap data et autres préservées.
+`update-client.sh` télécharge la dernière version depuis l'URL Dynmap, calcule le diff avec le profil local, et touche **uniquement** `mods/`, `resourcepacks/`, `shaderpacks/`, `datapacks/`. Configs, options, journeymap data et autres préservées.
 
 Le script lui-même est exposé via Dynmap HTTP (auto-copié à chaque `sync-pack.sh`) — pas besoin de cloner le repo côté client :
 

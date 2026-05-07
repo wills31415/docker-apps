@@ -241,11 +241,19 @@ def fetch_json(url):
 
 # Types d'assets scannés dans le profil (en plus de overrides/config/).
 # `fallback_env=None` → utilise la métadata Modrinth (client_side/server_side) du projet.
-# Pour les resource packs / shader packs, l'env est forcé : pure client-side.
+# Pour les autres dossiers, l'env est forcé.
+#
+# Note datapacks : ModrinthApp les extrait dans <profile>/datapacks/ — utile en
+# solo (auto-appliqués aux nouveaux mondes selon launcher). Pour le serveur
+# multijoueur, les datapacks vivent dans shared/data/world/datapacks/ — déposer
+# directement là, pas via le pack. Default env=optional/optional pour rester
+# flexible ; override possible par mod via SERVER_ONLY_PROJECTS / CLIENT_REQUIRED_PROJECTS
+# si le datapack est listé sur Modrinth.
 ASSET_TYPES = [
     ("mods",          "*.jar", None),
-    ("resourcepacks", "*.zip", {"client": "required", "server": "unsupported"}),
-    ("shaderpacks",   "*.zip", {"client": "optional", "server": "unsupported"}),
+    ("resourcepacks", "*.zip", {"client": "required",   "server": "unsupported"}),
+    ("shaderpacks",   "*.zip", {"client": "optional",   "server": "unsupported"}),
+    ("datapacks",     "*.zip", {"client": "optional",   "server": "optional"}),
 ]
 
 files, overrides = [], []  # overrides : liste de (Path source, str path-in-zip)

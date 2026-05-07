@@ -14,9 +14,9 @@
 # Effet :
 #   1. Télécharge le dernier .mrpack depuis Dynmap HTTP.
 #   2. Calcule le diff entre le manifeste et le profil local.
-#   3. mods/ + resourcepacks/ + shaderpacks/ : ajoute / supprime / met à jour
-#      les fichiers selon le manifeste. Les fichiers obsolètes sont DÉPLACÉS
-#      dans .update-backup/<timestamp>/ (jamais supprimés).
+#   3. mods/, resourcepacks/, shaderpacks/, datapacks/ : ajoute / supprime /
+#      met à jour les fichiers selon le manifeste. Les fichiers obsolètes sont
+#      DÉPLACÉS dans .update-backup/<timestamp>/ (jamais supprimés).
 #   4. NE TOUCHE PAS : config/, options.txt, journeymap/, screenshots/, saves/,
 #      logs/, crash-reports/, jei/, sodium/, et tout le reste.
 #
@@ -93,7 +93,7 @@ from pathlib import Path
 
 profile = Path(os.environ["PROFILE"])
 pack = Path(os.environ["PACK"])
-ASSET_FOLDERS = ("mods", "resourcepacks", "shaderpacks")
+ASSET_FOLDERS = ("mods", "resourcepacks", "shaderpacks", "datapacks")
 
 with zipfile.ZipFile(pack) as z:
     manifest = json.loads(z.read("modrinth.index.json"))
