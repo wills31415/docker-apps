@@ -1,0 +1,45 @@
+# =============================================================================
+# Cluster : minecraft-test (bac à sable Creative)
+# Tourne en parallèle de minecraft-server sur des ports différents.
+# Pas de Dynmap exposé. RCON sur localhost uniquement (admin via docker exec).
+# =============================================================================
+
+networks:
+  minecraft_test_net:
+    driver: bridge
+
+services:
+  minecraft-test:
+    image: itzg/minecraft-server:stable-java21
+    container_name: minecraft_test
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+
+    env_file:
+      - .env
+      - path: .env.local
+        required: false
+
+    environment:
+      EULA: "TRUE"
+      OVERRIDE_SERVER_PROPERTIES: "true"
+
+    # 25567 hôte → 25565 container (port jeu, accessible LAN)
+    # 127.0.0.1:25577 hôte → 25575 container (RCON, localhost-only)
+    ports:
+      - "25567:25565"
+      - "127.0.0.1:25577:25575"
+
+    volumes:
+      - ../shared/data:/data
+
+    healthcheck:
+      test: mc-health
+      start_period: 5m
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+    networks:
+      - minecraft_test_net
