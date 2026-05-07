@@ -66,16 +66,24 @@ Tant que l'auto-sync Modrinth ne marche pas, `sync-pack.sh` distribue automatiqu
 
 `update-client.sh` télécharge la dernière version depuis l'URL Dynmap, calcule le diff avec le profil local, et touche **uniquement** `mods/` + `resourcepacks/` + `shaderpacks/`. Configs, options, journeymap data et autres préservées.
 
+Le script lui-même est exposé via Dynmap HTTP (auto-copié à chaque `sync-pack.sh`) — pas besoin de cloner le repo côté client :
+
 ```bash
-# SteamDeck Flatpak — auto-détecte le profil :
-./update-client.sh
+# Une fois (download + run) :
+curl -fsSL http://90.79.99.178:25566/update-client.sh | bash
 
-# Override profil :
-./update-client.sh /chemin/vers/profil
+# Ou pour le garder localement et le relancer à volonté :
+curl -fsSL http://90.79.99.178:25566/update-client.sh -o ~/update-client.sh
+chmod +x ~/update-client.sh
+~/update-client.sh
+```
 
-# Override URL (autre serveur, fichier local pour test) :
-PACK_URL=http://autre.host:25566/coupaing-craft.mrpack ./update-client.sh
-PACK_URL=file:///chemin/local/pack.mrpack ./update-client.sh
+Le script auto-détecte le profil ModrinthApp standard `CoupaingCraft` (Flatpak SteamDeck, Linux natif, Windows). Override via :
+
+```bash
+~/update-client.sh /chemin/vers/profil                                  # path explicite
+PACK_NAME=AutreProfil ~/update-client.sh                                # autre nom de profil
+PACK_URL=http://autre.host:25566/coupaing-craft.mrpack ~/update-client.sh
 ```
 
 Anciens fichiers déplacés dans `<profil>/.update-backup/<timestamp>/`, jamais supprimés.

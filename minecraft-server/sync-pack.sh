@@ -397,11 +397,18 @@ KEEP_PATH="$SCRIPT_DIR/last-pack.mrpack"
 cp "$MRPACK_PATH" "$KEEP_PATH"
 PACK_LOCAL="$REPO_ROOT/$CLUSTER_NAME/shared/data/coupaing-craft-initial.mrpack"
 PACK_HTTP="$REPO_ROOT/$CLUSTER_NAME/shared/data/dynmap/web/coupaing-craft.mrpack"
+UPDATE_CLIENT_HTTP="$REPO_ROOT/$CLUSTER_NAME/shared/data/dynmap/web/update-client.sh"
 mkdir -p "$(dirname "$PACK_HTTP")"
 cp "$MRPACK_PATH" "$PACK_LOCAL"
 cp "$MRPACK_PATH" "$PACK_HTTP"
+# Expose update-client.sh à la même URL que le pack — le client n'a pas besoin
+# de cloner le repo, juste curl le script.
+if [[ -x "$SCRIPT_DIR/update-client.sh" ]]; then
+  cp "$SCRIPT_DIR/update-client.sh" "$UPDATE_CLIENT_HTTP"
+fi
 echo "📂 Fallback serveur     : $PACK_LOCAL"
 echo "🌐 Distribution clients : $PACK_HTTP"
+echo "🔧 Script update client : $UPDATE_CLIENT_HTTP"
 
 if [[ "$NO_UPLOAD" -eq 1 ]]; then
   echo "🛑 --no-upload : skip API Modrinth."
