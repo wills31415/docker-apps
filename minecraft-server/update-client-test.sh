@@ -1,43 +1,33 @@
 #!/usr/bin/env bash
 # =============================================================================
-# update-client.sh — Met à jour le profil ModrinthApp d'un client (SteamDeck)
-# vers la dernière version du pack, SANS toucher aux configs ni aux data.
+# update-client-test.sh — Variante de update-client.sh pour le cluster TEST.
+#
+# Met à jour le profil ModrinthApp dédié au serveur test (parallèle au profil
+# de prod). Touche UNIQUEMENT mods/, resourcepacks/, shaderpacks/, datapacks/.
+# Configs/saves/journeymap data préservées.
 #
 # Usage :
-#   ./update-client.sh                # Auto-détecte le profil par défaut.
-#   ./update-client.sh /chemin/profil # Override explicite.
+#   ./update-pack-test.sh                # auto-détecte le profil test
+#   ./update-pack-test.sh /chemin/profil # path explicite
 #
 # Variables d'env :
-#   PACK_URL   URL du .mrpack (default: http://90.79.99.178:25566/coupaing-craft.mrpack)
-#   PACK_NAME  Nom du dossier de profil ModrinthApp (default: CoupaingCraft)
-#
-# Effet :
-#   1. Télécharge le dernier .mrpack depuis Dynmap HTTP.
-#   2. Calcule le diff entre le manifeste et le profil local.
-#   3. mods/, resourcepacks/, shaderpacks/, datapacks/ : ajoute / supprime /
-#      met à jour les fichiers selon le manifeste. Les fichiers obsolètes sont
-#      DÉPLACÉS dans .update-backup/<timestamp>/ (jamais supprimés).
-#   4. NE TOUCHE PAS : config/, options.txt, journeymap/, screenshots/, saves/,
-#      logs/, crash-reports/, jei/, sodium/, et tout le reste.
-#
-# Conçu pour SteamDeck Flatpak (~/.var/app/com.modrinth.theseus/...). Auto-fallback
-# pour les installs Linux native et Windows.
+#   PACK_URL   URL du .mrpack
+#              (default: http://90.79.99.178:25566/coupaing-craft.mrpack
+#               — actuellement le test partage le pack de prod via copie auto
+#               au pre-up.sh côté serveur ; URL identique à update-client.sh.)
+#   PACK_NAME  Nom du dossier de profil ModrinthApp à viser
+#              (override la liste de candidats par défaut).
 # =============================================================================
 set -euo pipefail
 
-PACK_URL="${PACK_URL:-http://90.79.99.178:25566/coupaing-craft.mrpack}"
-# PACK_NAME peut être explicitement passé (ex : PACK_NAME=AutreProfil ./update-client.sh).
-# Sinon, on teste plusieurs noms de profil courants — l'historique des imports
-# successifs a laissé des profils nommés différemment (manifest.name, filename
-# du .mrpack au moment de l'import, etc.).
-PACK_NAMES_DEFAULT=("CoupaingCraft" "coupaing-craft" "pack")
+PACK_URL="${PACK_URL:-http://90.79.99.178:25566/coupaing-craft-test.mrpack}"
+PACK_NAMES_DEFAULT=("coupaing-craft-test" "CoupaingCraft-Test" "pack-test" "test" "coupaing-craft (test)")
 if [[ -n "${PACK_NAME:-}" ]]; then
   PACK_NAMES=("$PACK_NAME")
 else
   PACK_NAMES=("${PACK_NAMES_DEFAULT[@]}")
 fi
 
-# Racines ModrinthApp possibles (Flatpak SteamDeck, Linux natif, Windows).
 PROFILES_ROOTS=(
   "$HOME/.var/app/com.modrinth.ModrinthApp/data/ModrinthApp/profiles"  # Flatpak nouveau (SteamDeck/Linux)
   "$HOME/.var/app/com.modrinth.theseus/data/ModrinthApp/profiles"      # Flatpak ancien Theseus
@@ -63,18 +53,21 @@ detect_profile() {
 PROFILE="${1:-$(detect_profile || true)}"
 if [[ -z "${PROFILE:-}" || ! -d "$PROFILE" ]]; then
   {
-    echo "❌ Profil ModrinthApp introuvable."
+    echo "❌ Profil ModrinthApp test introuvable."
     echo "   Noms testés : ${PACK_NAMES[*]}"
     echo "   Profils disponibles :"
     for root in "${PROFILES_ROOTS[@]}"; do
       [[ -n "$root" && -d "$root" ]] || continue
       find "$root" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sed 's|^|     - |'
     done
+    echo ""
+    echo "   Crée un profil dédié au test dans ModrinthApp (ex: nom 'coupaing-craft-test',"
+    echo "   importé from-file ou cloné depuis le profil prod), puis relance."
     echo "   Override : $0 /chemin/vers/profile  ou  PACK_NAME=NomDuProfil $0"
   } >&2
   exit 1
 fi
-echo "📁 Profil : $PROFILE"
+echo "📁 Profil test : $PROFILE"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -82,7 +75,7 @@ trap 'rm -rf "$WORK"' EXIT
 echo "🌐 Téléchargement du pack ($PACK_URL)..."
 if ! curl -fsSL "$PACK_URL" -o "$WORK/pack.mrpack"; then
   echo "❌ Échec du téléchargement de $PACK_URL" >&2
-  echo "   Vérifier la connectivité au serveur (port 25566 doit être atteignable)." >&2
+  echo "   Vérifier que le serveur Dynmap (port 25566) est accessible." >&2
   exit 1
 fi
 echo "📦 $(du -h "$WORK/pack.mrpack" | cut -f1)"
@@ -99,7 +92,6 @@ ASSET_FOLDERS = ("mods", "resourcepacks", "shaderpacks", "datapacks")
 with zipfile.ZipFile(pack) as z:
     manifest = json.loads(z.read("modrinth.index.json"))
 
-    # Fichiers déclarés dans le manifeste (mods Modrinth canoniques)
     expected = {f: {} for f in ASSET_FOLDERS}
     for entry in manifest["files"]:
         path = entry["path"]
@@ -107,7 +99,6 @@ with zipfile.ZipFile(pack) as z:
         if folder not in expected or not fn or "/" in fn:
             continue
         env = entry.get("env", {})
-        # Sur un client, on n'installe pas les mods server-only
         if env.get("client") == "unsupported":
             continue
         expected[folder][fn] = {
@@ -115,7 +106,6 @@ with zipfile.ZipFile(pack) as z:
             "url":  entry["downloads"][0],
         }
 
-    # Fichiers présents dans overrides/ du .mrpack (jars patchés, configs perso)
     overrides_zentries = {f: {} for f in ASSET_FOLDERS}
     for name in z.namelist():
         if not name.startswith("overrides/"):
@@ -127,7 +117,6 @@ with zipfile.ZipFile(pack) as z:
         if folder in overrides_zentries and "/" not in fn:
             overrides_zentries[folder][fn] = name
 
-    # Compute backup dir lazily
     backup_dir = profile / ".update-backup" / datetime.now().strftime("%Y%m%d-%H%M%S")
     def to_backup(folder, src):
         target = backup_dir / folder
@@ -150,10 +139,8 @@ with zipfile.ZipFile(pack) as z:
         local_dir = profile / folder
         modrinth_files = expected[folder]
         override_zentries = overrides_zentries[folder]
-        # Le set "target" final = mods Modrinth + overrides
         target = set(modrinth_files) | set(override_zentries)
 
-        # Skip si pas de présence locale et rien à installer
         if not local_dir.exists() and not target:
             continue
         local_dir.mkdir(parents=True, exist_ok=True)
@@ -161,7 +148,6 @@ with zipfile.ZipFile(pack) as z:
         local_files = {p.name: p for p in local_dir.iterdir()
                        if p.is_file() and not p.name.startswith(".")}
 
-        # Compute SHA-1 pour les overrides (taille petite, lecture du zip)
         override_sha = {}
         override_data = {}
         for fn, zentry in override_zentries.items():
@@ -169,13 +155,11 @@ with zipfile.ZipFile(pack) as z:
             override_sha[fn] = sha1_bytes(data)
             override_data[fn] = data
 
-        # 1) Suppressions : fichiers locaux qui ne sont plus dans le pack
         for fn in sorted(set(local_files) - target):
             print(f"  🗑️  remove {folder}/{fn}")
             to_backup(folder, local_files[fn])
             summary["remove"] += 1
 
-        # 2) Ajouts : nouveaux fichiers
         for fn in sorted(target - set(local_files)):
             target_path = local_dir / fn
             if fn in override_zentries:
@@ -183,13 +167,12 @@ with zipfile.ZipFile(pack) as z:
                 print(f"  ➕ add (override) {folder}/{fn}")
             else:
                 req = urllib.request.Request(modrinth_files[fn]["url"],
-                                             headers={"User-Agent": "wsl/update-client/1.0"})
+                                             headers={"User-Agent": "wsl/update-client-test/1.0"})
                 with urllib.request.urlopen(req, timeout=60) as resp, target_path.open("wb") as dst:
                     shutil.copyfileobj(resp, dst)
                 print(f"  ➕ add {folder}/{fn}")
             summary["add"] += 1
 
-        # 3) Updates : fichiers présents des deux côtés mais SHA-1 différent
         for fn in sorted(target & set(local_files)):
             local_sha = sha1_file(local_files[fn])
             if fn in override_zentries:
@@ -207,49 +190,15 @@ with zipfile.ZipFile(pack) as z:
                     continue
                 to_backup(folder, local_files[fn])
                 req = urllib.request.Request(modrinth_files[fn]["url"],
-                                             headers={"User-Agent": "wsl/update-client/1.0"})
+                                             headers={"User-Agent": "wsl/update-client-test/1.0"})
                 with urllib.request.urlopen(req, timeout=60) as resp, (local_dir / fn).open("wb") as dst:
                     shutil.copyfileobj(resp, dst)
                 print(f"  🔄 update {folder}/{fn}")
             summary["update"] += 1
 
-    # Configs intentionnellement shippées par le pack (overrides/config/**) :
-    # extraites dans <profile>/config/**, avec backup si l'existant diffère.
-    # Les fichiers non-shippés par le pack ne sont jamais touchés.
-    config_summary = {"add": 0, "update": 0, "ok": 0}
-    config_dir = profile / "config"
-    for zentry in z.namelist():
-        if not zentry.startswith("overrides/config/") or zentry.endswith("/"):
-            continue
-        rel = zentry[len("overrides/config/"):]
-        if not rel:
-            continue
-        target_path = config_dir / rel
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        new_data = z.read(zentry)
-        new_sha = sha1_bytes(new_data)
-        if target_path.exists():
-            with target_path.open("rb") as fh:
-                local_sha = sha1_bytes(fh.read())
-            if local_sha == new_sha:
-                config_summary["ok"] += 1
-                continue
-            backup = backup_dir / "config" / rel
-            backup.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(target_path), str(backup))
-            target_path.write_bytes(new_data)
-            print(f"  🔄 update config/{rel}")
-            config_summary["update"] += 1
-        else:
-            target_path.write_bytes(new_data)
-            print(f"  ➕ add config/{rel}")
-            config_summary["add"] += 1
-
-print(f"\n📊 Résumé mods/RPs : {summary['add']} ajout(s), {summary['update']} update(s), "
+print(f"\n📊 Résumé : {summary['add']} ajout(s), {summary['update']} update(s), "
       f"{summary['remove']} retiré(s), {summary['ok']} OK.")
-if any(config_summary.values()):
-    print(f"📊 Résumé configs : {config_summary['add']} ajout(s), {config_summary['update']} update(s), {config_summary['ok']} OK.")
 if backup_dir.exists():
     print(f"💾 Anciens fichiers déplacés : {backup_dir}")
-print(f"\n✅ Update terminée — autres data joueur (saves, options, journeymap, screenshots) préservées.")
+print(f"\n✅ Update terminée — config/, options.txt, journeymap/, saves/ et autres data préservées.")
 PYEOF

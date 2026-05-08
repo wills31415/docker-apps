@@ -35,27 +35,32 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # ─── Flags ───────────────────────────────────────────────────────────────────
-DRY_RUN=0; NO_UPLOAD=0; NO_DEPLOY=0
+DRY_RUN=0; NO_UPLOAD=0; NO_DEPLOY=0; BUILD_TEST_PACK=0
 CHANGELOG=""
 
 usage() {
   cat <<EOF
-Usage: ./sync-pack.sh [--dry-run|--no-upload|--no-deploy] [changelog]
+Usage: ./sync-pack.sh [--dry-run|--no-upload|--no-deploy|--test] [changelog]
 
-Sans flag : build → upload Modrinth → da restart minecraft-server.
+Sans flag : build (mods/) → upload Modrinth → da restart minecraft-server.
 
 Flags :
   --dry-run     Build le .mrpack puis stop (palier A). Implique --no-upload + --no-deploy.
   --no-upload   Build seulement, pas d'upload (implique --no-deploy).
   --no-deploy   Build + upload, pas de da restart (palier B).
+  --test        Build d'un PACK TEST séparé incluant aussi <profil>/mods-test-only/.
+                Sortie : shared/data/coupaing-craft-test.mrpack + dynmap/web/coupaing-craft-test.mrpack.
+                N'upload PAS sur Modrinth, ne touche PAS au pack prod ni à coupaing-craft-initial.mrpack.
+                Workflow : itérer en test → quand validé, déplacer mods-test-only/<jar> vers
+                mods/ et faire ./sync-pack.sh "promote <jar>" pour pousser en prod.
   -h, --help    Cette aide.
 
 Variables d'environnement utiles (override des valeurs par défaut en tête de script) :
-  PACK_NAME=<NomDuDossierProfil>          (default: pack)
+  PACK_NAME=<NomDuDossierProfil>          (default: CoupaingCraft-Master)
   PACK_DISPLAY_NAME=<NomAffichéManifest>  (default: coupaing-craft)
   MODRINTH_PROJECT_ID=<ID-du-projet-Modrinth>
   MODRINTH_PROFILE_DIR=<chemin-explicite>
-  GAME_VERSION=1.21.11   LOADER=fabric   LOADER_VERSION=0.19.2
+  GAME_VERSION=1.20.1   LOADER=fabric   LOADER_VERSION=0.19.2
 
 PAT Modrinth lu en série : secret-tool (service=$SECRET_TOOL_SERVICE) → $TOKEN_FILE → \$MODRINTH_TOKEN.
 EOF
@@ -66,6 +71,7 @@ while [[ $# -gt 0 ]]; do
     --dry-run)   DRY_RUN=1; NO_UPLOAD=1; NO_DEPLOY=1; shift ;;
     --no-upload) NO_UPLOAD=1; NO_DEPLOY=1; shift ;;
     --no-deploy) NO_DEPLOY=1; shift ;;
+    --test)      BUILD_TEST_PACK=1; NO_UPLOAD=1; NO_DEPLOY=1; shift ;;
     -h|--help)   usage; exit 0 ;;
     -*)          echo "❌ Flag inconnu : $1" >&2; usage >&2; exit 2 ;;
     *)           CHANGELOG="$1"; shift ;;
@@ -215,6 +221,10 @@ else
 fi
 
 # ─── Build du .mrpack via Python ─────────────────────────────────────────────
+TEST_DISPLAY_NAME="${PACK_DISPLAY_NAME}-test"
+BUILD_DISPLAY_NAME="$PACK_DISPLAY_NAME"
+[[ "$BUILD_TEST_PACK" -eq 1 ]] && BUILD_DISPLAY_NAME="$TEST_DISPLAY_NAME"
+
 PROFILE_DIR="$PROFILE_DIR" \
 GAME_VERSION="$GAME_VERSION" \
 LOADER="$LOADER" \
@@ -223,7 +233,8 @@ SERVER_ONLY_PROJECTS="$SERVER_ONLY_PROJECTS" \
 CLIENT_REQUIRED_PROJECTS="$CLIENT_REQUIRED_PROJECTS" \
 MRPACK_PATH="$MRPACK_PATH" \
 PACK_VERSION="$VERSION_NUMBER" \
-PACK_DISPLAY_NAME="$PACK_DISPLAY_NAME" \
+PACK_DISPLAY_NAME="$BUILD_DISPLAY_NAME" \
+BUILD_TEST_PACK="$BUILD_TEST_PACK" \
 USER_AGENT="$USER_AGENT" \
 python3 - <<'PYEOF'
 import hashlib, json, os, sys, urllib.request, urllib.error, zipfile
@@ -268,18 +279,26 @@ def fetch_json(url):
 # directement là, pas via le pack. Default env=optional/optional pour rester
 # flexible ; override possible par mod via SERVER_ONLY_PROJECTS / CLIENT_REQUIRED_PROJECTS
 # si le datapack est listé sur Modrinth.
+# Tuple : (scan_folder, glob, fallback_env, manifest_folder).
+# manifest_folder = chemin dans le .mrpack (différent de scan_folder pour
+# mods-test-only/ → mappé vers mods/ pour qu'ModrinthApp les installe au bon endroit).
 ASSET_TYPES = [
-    ("mods",          "*.jar", None),
-    ("resourcepacks", "*.zip", {"client": "required",   "server": "unsupported"}),
-    ("shaderpacks",   "*.zip", {"client": "optional",   "server": "unsupported"}),
-    ("datapacks",     "*.zip", {"client": "optional",   "server": "optional"}),
+    ("mods",          "*.jar", None,                                            "mods"),
+    ("resourcepacks", "*.zip", {"client": "required",   "server": "unsupported"}, "resourcepacks"),
+    ("shaderpacks",   "*.zip", {"client": "optional",   "server": "unsupported"}, "shaderpacks"),
+    ("datapacks",     "*.zip", {"client": "optional",   "server": "optional"},   "datapacks"),
 ]
+# En mode test : on inclut aussi mods-test-only/ (extras non-mergés en prod) en
+# les mappant vers mods/ dans le manifest.
+if os.environ.get("BUILD_TEST_PACK") == "1":
+    ASSET_TYPES.append(("mods-test-only", "*.jar", None, "mods"))
+    print("🧪 Mode TEST : scanne aussi mods-test-only/")
 
 files, overrides = [], []  # overrides : liste de (Path source, str path-in-zip)
 seen_projects = defaultdict(list)
 total_assets = 0
 
-for folder, glob_pat, fallback_env in ASSET_TYPES:
+for folder, glob_pat, fallback_env, manifest_folder in ASSET_TYPES:
     asset_dir = profile / folder
     if not asset_dir.is_dir():
         continue
@@ -303,7 +322,7 @@ for folder, glob_pat, fallback_env in ASSET_TYPES:
         version_info = fetch_json(f"https://api.modrinth.com/v2/version_file/{sha1}?algorithm=sha1")
         if version_info is None:
             print( "    ⚠️  Pas sur Modrinth → overrides/")
-            overrides.append((item, f"overrides/{folder}/{item.name}"))
+            overrides.append((item, f"overrides/{manifest_folder}/{item.name}"))
             continue
 
         project_id = version_info["project_id"]
@@ -332,7 +351,7 @@ for folder, glob_pat, fallback_env in ASSET_TYPES:
 
         primary = next((f for f in version_info["files"] if f.get("primary")), version_info["files"][0])
         files.append({
-            "path": f"{folder}/{item.name}",
+            "path": f"{manifest_folder}/{item.name}",
             "hashes": {"sha1": primary["hashes"]["sha1"], "sha512": primary["hashes"]["sha512"]},
             "env": env,
             "downloads": [primary["url"]],
@@ -415,27 +434,47 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
 fi
 
 # ─── Distribution locale du pack (hors --dry-run) ───────────────────────────
-# Toujours sauver une copie inspectable + diffuser aux deux endroits attendus :
-#   - shared/data/coupaing-craft-initial.mrpack : utilisé par itzg comme fallback
-#     local tant que le projet Modrinth est en review (cf. SYNC.md § État Modrinth).
-#   - shared/data/dynmap/web/coupaing-craft.mrpack : exposé via Dynmap HTTP pour
-#     update-client.sh sur les machines clientes.
+# Mode TEST :
+#   Pack écrit en parallèle de la prod, NE TOUCHE PAS au pack prod ni à Modrinth.
+#     - shared/data/coupaing-craft-test.mrpack          (lu par minecraft-test)
+#     - shared/data/dynmap/web/coupaing-craft-test.mrpack (HTTP pour update-client-test.sh)
+#   Plus update-client-test.sh exposé via Dynmap.
+#
+# Mode PROD (défaut) :
+#   Distribue aux deux endroits attendus :
+#     - shared/data/coupaing-craft-initial.mrpack       (lu par minecraft-server, fallback Under review)
+#     - shared/data/dynmap/web/coupaing-craft.mrpack    (HTTP pour update-client.sh)
+#   Plus les deux update-client*.sh exposés via Dynmap.
 KEEP_PATH="$SCRIPT_DIR/last-pack.mrpack"
 cp "$MRPACK_PATH" "$KEEP_PATH"
+WEB_DIR="$REPO_ROOT/$CLUSTER_NAME/shared/data/dynmap/web"
+mkdir -p "$WEB_DIR"
+
+# Toujours republier les scripts update-client*.sh (utiles dans tous les modes)
+[[ -x "$SCRIPT_DIR/update-client.sh"      ]] && cp "$SCRIPT_DIR/update-client.sh"      "$WEB_DIR/update-client.sh"
+[[ -x "$SCRIPT_DIR/update-client-test.sh" ]] && cp "$SCRIPT_DIR/update-client-test.sh" "$WEB_DIR/update-client-test.sh"
+
+if [[ "$BUILD_TEST_PACK" -eq 1 ]]; then
+  TEST_PACK_LOCAL="$REPO_ROOT/$CLUSTER_NAME/shared/data/coupaing-craft-test.mrpack"
+  TEST_PACK_HTTP="$WEB_DIR/coupaing-craft-test.mrpack"
+  cp "$MRPACK_PATH" "$TEST_PACK_LOCAL"
+  cp "$MRPACK_PATH" "$TEST_PACK_HTTP"
+  echo "🧪 Test pack écrit (NE TOUCHE PAS À LA PROD) :"
+  echo "    Fallback test cluster : $TEST_PACK_LOCAL"
+  echo "    Distribution clients  : $TEST_PACK_HTTP"
+  echo ""
+  echo "Suite : ./da restart minecraft-test  (côté serveur)"
+  echo "        ~/update-client-test.sh      (côté client)"
+  exit 0
+fi
+
 PACK_LOCAL="$REPO_ROOT/$CLUSTER_NAME/shared/data/coupaing-craft-initial.mrpack"
-PACK_HTTP="$REPO_ROOT/$CLUSTER_NAME/shared/data/dynmap/web/coupaing-craft.mrpack"
-UPDATE_CLIENT_HTTP="$REPO_ROOT/$CLUSTER_NAME/shared/data/dynmap/web/update-client.sh"
-mkdir -p "$(dirname "$PACK_HTTP")"
+PACK_HTTP="$WEB_DIR/coupaing-craft.mrpack"
 cp "$MRPACK_PATH" "$PACK_LOCAL"
 cp "$MRPACK_PATH" "$PACK_HTTP"
-# Expose update-client.sh à la même URL que le pack — le client n'a pas besoin
-# de cloner le repo, juste curl le script.
-if [[ -x "$SCRIPT_DIR/update-client.sh" ]]; then
-  cp "$SCRIPT_DIR/update-client.sh" "$UPDATE_CLIENT_HTTP"
-fi
 echo "📂 Fallback serveur     : $PACK_LOCAL"
 echo "🌐 Distribution clients : $PACK_HTTP"
-echo "🔧 Script update client : $UPDATE_CLIENT_HTTP"
+echo "🔧 Scripts update       : $WEB_DIR/update-client*.sh"
 
 if [[ "$NO_UPLOAD" -eq 1 ]]; then
   echo "🛑 --no-upload : skip API Modrinth."

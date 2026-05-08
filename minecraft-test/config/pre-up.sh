@@ -8,22 +8,35 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SHARED_DIR="$SCRIPT_DIR/../shared"
-PROD_MRPACK="$SCRIPT_DIR/../../minecraft-server/shared/data/coupaing-craft-initial.mrpack"
-TEST_MRPACK="$SHARED_DIR/data/coupaing-craft-initial.mrpack"
+SRC_TEST_MRPACK="$SCRIPT_DIR/../../minecraft-server/shared/data/coupaing-craft-test.mrpack"
+SRC_PROD_MRPACK="$SCRIPT_DIR/../../minecraft-server/shared/data/coupaing-craft-initial.mrpack"
+DST_MRPACK="$SHARED_DIR/data/coupaing-craft-test.mrpack"
 
 echo "🔧 [pre-up test] Préparation des répertoires..."
 mkdir -p "$SHARED_DIR/data"
 mkdir -p "$SHARED_DIR/backups"
 
-# Copie du mrpack depuis prod si plus récent (idempotent)
-if [ -f "$PROD_MRPACK" ]; then
-    if [ ! -f "$TEST_MRPACK" ] || [ "$PROD_MRPACK" -nt "$TEST_MRPACK" ]; then
-        cp "$PROD_MRPACK" "$TEST_MRPACK"
-        echo "📦 [pre-up test] .mrpack copié depuis prod ($(du -h "$TEST_MRPACK" | cut -f1))"
+# Copie du test pack depuis prod (priorité au test pack généré par sync-pack.sh --test ;
+# fallback sur le pack prod tel quel si pas de test pack — utile si tu veux juste un
+# bac à sable Creative avec le pack actuel sans extras).
+SRC=""
+if [ -f "$SRC_TEST_MRPACK" ]; then
+    SRC="$SRC_TEST_MRPACK"
+    SRC_LABEL="test pack (mods + mods-test-only)"
+elif [ -f "$SRC_PROD_MRPACK" ]; then
+    SRC="$SRC_PROD_MRPACK"
+    SRC_LABEL="pack prod (pas de test pack généré pour l'instant)"
+fi
+
+if [ -n "$SRC" ]; then
+    if [ ! -f "$DST_MRPACK" ] || [ "$SRC" -nt "$DST_MRPACK" ]; then
+        cp "$SRC" "$DST_MRPACK"
+        echo "📦 [pre-up test] .mrpack copié depuis $SRC_LABEL ($(du -h "$DST_MRPACK" | cut -f1))"
     fi
 else
-    echo "⚠️  [pre-up test] Pack prod introuvable : $PROD_MRPACK"
-    echo "   Démarrer le cluster prod au moins une fois pour le générer, ou poser un .mrpack manuellement."
+    echo "⚠️  [pre-up test] Aucun .mrpack source trouvé."
+    echo "   Lancer prod au moins une fois (./sync-pack.sh) ou bien :"
+    echo "   ./sync-pack.sh --test pour générer un test pack."
     exit 1
 fi
 

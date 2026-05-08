@@ -43,3 +43,24 @@ services:
 
     networks:
       - minecraft_test_net
+
+  # ---------------------------------------------------------------------------
+  # SERVICE : nginx-static
+  # Sert les fichiers de minecraft-server/shared/data/dynmap/web/ via HTTP sur
+  # le port 25566 (même URL que la prod via Dynmap), pour que les clients
+  # SteamDeck puissent curl le pack test + les scripts update-client*.sh
+  # quand seul le cluster test tourne (prod down).
+  # Pas de conflit de port car prod et test ne tournent jamais simultanément
+  # (constraint mémoire — downscale obligatoire).
+  # ---------------------------------------------------------------------------
+  nginx-static:
+    image: nginx:alpine
+    container_name: minecraft_test_nginx
+    restart: unless-stopped
+    ports:
+      - "25566:80"
+    volumes:
+      # Sert le même dossier que prod's Dynmap → mêmes URLs côté client.
+      - ../../minecraft-server/shared/data/dynmap/web:/usr/share/nginx/html:ro
+    networks:
+      - minecraft_test_net
