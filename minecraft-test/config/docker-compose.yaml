@@ -27,9 +27,11 @@ services:
 
     # 25567 hôte → 25565 container (port jeu, accessible LAN)
     # 127.0.0.1:25577 hôte → 25575 container (RCON, localhost-only)
+    # 25570 hôte → 8123 container (Dynmap web map test, accessible LAN)
     ports:
       - "25567:25565"
       - "127.0.0.1:25577:25575"
+      - "25570:8123"
 
     volumes:
       - ../shared/data:/data

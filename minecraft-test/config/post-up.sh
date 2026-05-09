@@ -39,3 +39,28 @@ echo "  💡 Le test partage le pack courant de prod (recopie auto au pre-up)."
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
+
+# --- Watcher dynmap-auto-render (pour la web map test) ----------------------
+# Réutilise le script du cluster prod, override CONTAINER + OVERWORLD_WORLD.
+WATCHER_SCRIPT="$SCRIPT_DIR/../../minecraft-server/config/dynmap-auto-render.sh"
+WATCHER_PID_FILE="$SCRIPT_DIR/../shared/dynmap-auto-render.pid"
+WATCHER_LOG_FILE="$SCRIPT_DIR/../shared/dynmap-auto-render.log"
+LEVEL="${LEVEL:-world}"
+
+if [ -f "$WATCHER_PID_FILE" ]; then
+    old_pid=$(cat "$WATCHER_PID_FILE" 2>/dev/null || true)
+    if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
+        kill "$old_pid" 2>/dev/null || true
+    fi
+    rm -f "$WATCHER_PID_FILE"
+fi
+
+if [ -x "$WATCHER_SCRIPT" ]; then
+    CONTAINER=minecraft_test OVERWORLD_WORLD="$LEVEL" \
+        nohup "$WATCHER_SCRIPT" >> "$WATCHER_LOG_FILE" 2>&1 &
+    echo $! > "$WATCHER_PID_FILE"
+    disown
+    echo "🔁 [post-up test] Watcher dynmap-auto-render démarré (PID $(cat "$WATCHER_PID_FILE"))."
+    echo "   Logs : minecraft-test/shared/dynmap-auto-render.log"
+    echo ""
+fi

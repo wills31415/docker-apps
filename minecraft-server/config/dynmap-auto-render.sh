@@ -34,8 +34,12 @@ PER_PLAYER_BONUS="${PER_PLAYER_BONUS:-64}"
 COOLDOWN_SEC="${COOLDOWN_SEC:-300}"
 COOLDOWN_GRID="${COOLDOWN_GRID:-64}"
 
+# Le nom de la dimension overworld dépend du LEVEL configuré dans le .env
+# (default: 'world' sur prod, 'test_world' sur test). Override via env :
+#   OVERWORLD_WORLD=test_world ./dynmap-auto-render.sh
+OVERWORLD_WORLD="${OVERWORLD_WORLD:-world}"
 declare -A DIM_TO_WORLD=(
-    ['minecraft:overworld']='world'
+    ['minecraft:overworld']="$OVERWORLD_WORLD"
     ['minecraft:the_nether']='DIM-1'
     ['minecraft:the_end']='DIM1'
 )

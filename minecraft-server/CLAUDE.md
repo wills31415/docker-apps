@@ -103,6 +103,8 @@ cp <chemin-vers-jar> /home/wsl/docker-apps/minecraft-server/shared/data/dynmap/w
 
 Pour shipper des defaults pack-spécifiques (ex: presets dynmap-public, JEI bookmarks pré-configurés), créer un dossier `<profile>/pack-overrides/` dans le master ; son contenu est embarqué tel quel dans `overrides/` du `.mrpack`. Ne **jamais** y mettre de configs susceptibles d'être tweakées par le joueur.
 
+**Datapacks worldgen** : pour shipper un datapack qui doit s'appliquer à tous les serveurs/clients (ex: tweaks de spacing/separation des structures), placer le dossier dans `<profile>/pack-overrides/world/datapacks/<nom>/`. Il sera extrait par itzg dans `/data/world/datapacks/<nom>/` au boot et auto-chargé par MC. Exemple actif : `coupaing-craft-density` (boost villages + ATi structures, voir `pack-overrides/world/datapacks/coupaing-craft-density/`).
+
 ## Fichiers clés
 
 ```
