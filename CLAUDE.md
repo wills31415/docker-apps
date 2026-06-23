@@ -46,7 +46,7 @@ docker-apps/
 
 - **Volumes** : tous les bind mounts hôte doivent pointer vers `<cluster>/shared/`. Depuis un `docker-compose.yaml` dans `config/`, le chemin relatif est `../shared/`.
 - **Hooks** : doivent être `chmod +x`. S'ils échouent (exit != 0), l'opération `up`/`down` est interrompue.
-- **ssh-lab** : le `docker-compose.yaml` est **auto-généré** par `pre-up.sh` depuis `cluster.conf`. Ne jamais l'éditer à la main.
+- **net-lab** : le `docker-compose.yaml` est **auto-généré** par `pre-up.sh` depuis `topology.conf` + `box.conf`. Ne jamais l'éditer à la main. La box ne s'administre que via `box-apply.sh` / `box-status.sh`.
 - **Gitignore** : `/*/shared/*` — les données runtime ne sont jamais committées.
 
 ## Clusters existants
@@ -55,7 +55,7 @@ docker-apps/
 |---------|-------------|----------------|
 | `postgresql` | PostgreSQL 16 + Adminer | Healthcheck, initdb scripts, réseau isolé |
 | `minecraft-server` | Serveur Minecraft Fabric + modpacks Modrinth | Config via `.env`, healthcheck, RCON |
-| `ssh-lab` | Lab SSH multi-noeud (master/client/gateway/server) | Compose auto-généré, topologie configurable via `cluster.conf` |
+| `net-lab` | Simulateur réseau domestique : box NAT/DMZ + nodes (gateway/server/nas/client) sur 3 réseaux WAN/LAN/DMZ | Compose auto-généré (`topology.conf` + `box.conf`) ; box = vrai routeur iptables piloté via une « IHM » |
 | `sftp` | Serveur SFTP (atmoz/sftp) | Minimal, port 2222 |
 
 ## Ajouter un nouveau cluster

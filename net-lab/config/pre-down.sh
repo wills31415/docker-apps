@@ -4,8 +4,7 @@
 # ============================================================
 set -euo pipefail
 echo ""
-echo "🛑  Arrêt du cluster ssh-lab…"
-echo "    Volumes nommés (données /root, /etc/ssh) : conservés"
-echo "    shared/admin-key/  : clé admin conservée"
-echo "    shared/uploads/    : uploads conservés"
+echo "🛑  Arrêt de net-lab…"
+echo "    Volumes nommés (/root, /etc/ssh des machines) : conservés"
+echo "    shared/uploads/ et shared/box/ : conservés"
 echo ""

@@ -1,26 +1,24 @@
 # ============================================================
-#  GATEWAY — ssh-lab v6
-#  Rôle   : Jump host entre client-net et server-net
-#  Réseau : client-net ET server-net
-#  OS     : Debian 12 (bookworm)
-#  sshd   : OUI, foreground -D -e
+#  net-lab — NODE (image commune : nas / gateway / server / client)
+#  Le rôle est choisi à l'exécution via la variable NODE_ROLE.
+#  Petit Linux : bash, apt, curl, ssh (server+client), python3.
 # ============================================================
-FROM debian:12
+FROM debian:12-slim
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         tini \
         openssh-server \
         openssh-client \
+        iproute2 \
         sudo \
+        curl \
+        ca-certificates \
+        python3 \
         nano \
-        make \
  && rm -rf /var/lib/apt/lists/* \
- && useradd -m -s /bin/bash admin \
- && echo "admin ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/admin \
- && chmod 440 /etc/sudoers.d/admin \
- && mkdir -p /root/.ssh /home/admin/.ssh /run/sshd \
- && chmod 700 /root/.ssh /home/admin/.ssh
+ && mkdir -p /run/sshd /root/.ssh \
+ && chmod 700 /root/.ssh
 
 EXPOSE 22
 

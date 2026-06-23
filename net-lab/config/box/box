@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# ============================================================
+#  box — CLI interne du routeur net-lab
+#
+#  Sous-commandes :
+#    box apply    relit box.conf et (re)construit les règles iptables
+#                 (NAT/DNAT + pare-feu DMZ). Idempotent.
+#    box status   affiche l'état courant (config + règles actives)
+#
+#  N'est PAS destiné à un usage direct : il est piloté depuis
+#  l'hôte par box-apply.sh / box-status.sh (l'« IHM »).
+#
+#  Entrées :
+#    /etc/net-lab/box.conf  (monté ro)  → PUBLIC_IP, *_SUBNET, DMZ_HOST, FORWARDS
+#    $HOSTMAP  (env, "nom=ip;nom=ip")   → résolution nom de machine → IP
+# ============================================================
+set -euo pipefail
+
+BOX_CONF="${BOX_CONF:-/etc/net-lab/box.conf}"
+
+die() { echo "❌  box: $*" >&2; exit 1; }
+
+load_conf() {
+    [ -f "$BOX_CONF" ] || die "config introuvable : $BOX_CONF"
+    # shellcheck source=/dev/null
+    source "$BOX_CONF"
+    : "${PUBLIC_IP:?PUBLIC_IP manquant}" "${LAN_SUBNET:?}" "${DMZ_SUBNET:?}"
+}
+
+# Résout un nom de machine en IP via $HOSTMAP ("gateway=192.168.1.10;nas=...")
+resolve() {
+    local name="$1" pair
+    for pair in ${HOSTMAP//;/ }; do
+        [ "${pair%%=*}" = "$name" ] && { echo "${pair#*=}"; return 0; }
+    done
+    return 1
+}
+
+cmd_apply() {
+    load_conf
+    sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
+
+    # ── Remise à zéro de NOS tables (namespace réseau de la box) ──
+    iptables -t nat -F
+    iptables -F FORWARD
+    iptables -P FORWARD DROP
+
+    # ── Pare-feu inter-segments (la matrice de la DMZ) ───────────
+    # Le trafic retour est toujours autorisé.
+    iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+    # DMZ → LAN : INTERDIT (raison d'être de la DMZ).
+    iptables -A FORWARD -s "$DMZ_SUBNET" -d "$LAN_SUBNET" -j DROP
+    # Connexions entrantes redirigées (DNAT) : autorisées.
+    iptables -A FORWARD -m conntrack --ctstate DNAT -j ACCEPT
+    # LAN → DMZ : autorisé (le LAN est de confiance).
+    iptables -A FORWARD -s "$LAN_SUBNET" -d "$DMZ_SUBNET" -j ACCEPT
+    # LAN/DMZ → reste (WAN) : autorisé.
+    iptables -A FORWARD -s "$LAN_SUBNET" -j ACCEPT
+    iptables -A FORWARD -s "$DMZ_SUBNET" -j ACCEPT
+
+    # ── Redirections de ports (DNAT sur l'IP publique) ───────────
+    local rule proto pub tgt tport tip n=0
+    for rule in "${FORWARDS[@]:-}"; do
+        [ -z "$rule" ] && continue
+        IFS=':' read -r proto pub tgt tport <<< "$rule"
+        if ! tip="$(resolve "$tgt")"; then
+            echo "⚠️  redirection ignorée (machine inconnue : $tgt) : $rule" >&2
+            continue
+        fi
+        iptables -t nat -A PREROUTING -d "$PUBLIC_IP" -p "$proto" \
+            --dport "$pub" -j DNAT --to-destination "$tip:$tport"
+        n=$((n + 1))
+    done
+
+    # MASQUERADE du trafic que la box pousse vers LAN/DMZ
+    # → chemin de retour propre, sans toucher aux routes des machines.
+    iptables -t nat -A POSTROUTING -d "$LAN_SUBNET" -j MASQUERADE
+    iptables -t nat -A POSTROUTING -d "$DMZ_SUBNET" -j MASQUERADE
+
+    echo "✅  box: règles appliquées ($n redirection(s), DMZ=${DMZ_HOST:-?})"
+}
+
+cmd_status() {
+    load_conf
+    echo "╔══════════════════════════════════════════════════════════╗"
+    echo "║  BOX net-lab — état courant                              ║"
+    echo "╠══════════════════════════════════════════════════════════╣"
+    printf "  IP publique : %s\n" "$PUBLIC_IP"
+    printf "  WAN : %-18s LAN : %-18s\n" "${WAN_SUBNET:-?}" "$LAN_SUBNET"
+    printf "  DMZ : %-18s hôte DMZ : %s\n" "$DMZ_SUBNET" "${DMZ_HOST:-?}"
+    echo "  ── Baux statiques ───────────────────────────────────────"
+    local l
+    for l in "${LEASES[@]:-}"; do [ -n "$l" ] && printf "    %s\n" "$l"; done
+    echo "  ── Redirections (proto:public → cible:port) ─────────────"
+    local rule proto pub tgt tport tip
+    for rule in "${FORWARDS[@]:-}"; do
+        [ -z "$rule" ] && continue
+        IFS=':' read -r proto pub tgt tport <<< "$rule"
+        tip="$(resolve "$tgt" || echo '???')"
+        printf "    %s/%s → %s (%s):%s\n" "$proto" "$pub" "$tgt" "$tip" "$tport"
+    done
+    echo "  ── iptables nat (actif) ─────────────────────────────────"
+    iptables -t nat -S | sed 's/^/    /'
+    echo "  ── iptables filter FORWARD (actif) ──────────────────────"
+    iptables -S FORWARD | sed 's/^/    /'
+    echo "╚══════════════════════════════════════════════════════════╝"
+}
+
+case "${1:-}" in
+    apply)  cmd_apply ;;
+    status) cmd_status ;;
+    *) die "usage : box {apply|status}" ;;
+esac
