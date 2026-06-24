@@ -3,15 +3,17 @@
 #  box — CLI interne du routeur net-lab
 #
 #  Sous-commandes :
-#    box apply    relit box.conf et (re)construit les règles iptables
-#                 (NAT/DNAT + pare-feu DMZ). Idempotent.
-#    box status   affiche l'état courant (config + règles actives)
+#    box apply      relit box.conf et (re)construit les règles iptables
+#                   (NAT/DNAT + pare-feu DMZ + mode egress). Idempotent.
+#    box status     affiche l'état courant (config + règles + compteurs)
+#    box conntrack  affiche la table de suivi de connexions (NAT en direct)
 #
 #  N'est PAS destiné à un usage direct : il est piloté depuis
 #  l'hôte par box-apply.sh / box-status.sh (l'« IHM »).
 #
 #  Entrées :
-#    /etc/net-lab/box.conf  (monté ro)  → PUBLIC_IP, *_SUBNET, DMZ_HOST, FORWARDS
+#    /etc/net-lab/box.conf  (monté ro)  → PUBLIC_IP, *_SUBNET, DMZ_HOST,
+#                                          FORWARDS, EGRESS_VIA_BOX
 #    $HOSTMAP  (env, "nom=ip;nom=ip")   → résolution nom de machine → IP
 # ============================================================
 set -euo pipefail
@@ -72,12 +74,44 @@ cmd_apply() {
         n=$((n + 1))
     done
 
-    # MASQUERADE du trafic que la box pousse vers LAN/DMZ
-    # → chemin de retour propre, sans toucher aux routes des machines.
-    iptables -t nat -A POSTROUTING -d "$LAN_SUBNET" -j MASQUERADE
-    iptables -t nat -A POSTROUTING -d "$DMZ_SUBNET" -j MASQUERADE
+    # ── DMZ host : tout le trafic entrant NON déjà redirigé → cet hôte ──
+    # Sémantique réelle du « DMZ host » d'une box grand public. Ajouté APRÈS
+    # les redirections explicites, qui gardent donc la priorité (1re règle
+    # DNAT qui matche l'emporte). Port d'origine conservé (pas de :port).
+    local dmz_ip=""
+    if [ -n "${DMZ_HOST:-}" ]; then
+        if dmz_ip="$(resolve "$DMZ_HOST")"; then
+            iptables -t nat -A PREROUTING -d "$PUBLIC_IP" -p tcp -j DNAT --to-destination "$dmz_ip"
+            iptables -t nat -A PREROUTING -d "$PUBLIC_IP" -p udp -j DNAT --to-destination "$dmz_ip"
+        else
+            echo "⚠️  DMZ_HOST inconnu (ignoré) : $DMZ_HOST" >&2
+            dmz_ip=""
+        fi
+    fi
 
-    echo "✅  box: règles appliquées ($n redirection(s), DMZ=${DMZ_HOST:-?})"
+    # ── NAT sortant : dépend du mode d'egress ────────────────────
+    if [ "${EGRESS_VIA_BOX:-0}" = "1" ]; then
+        # Box = passerelle par défaut des nodes : on ne masque QUE vers
+        # l'extérieur (WAN/Internet). En interne (LAN↔DMZ et DNAT entrant)
+        # la source réelle est préservée — le retour repasse par la box.
+        # NB : iptables-nft refuse plusieurs `! -d` dans une seule règle →
+        # on saute MASQUERADE en RETURN quand la destination reste interne.
+        iptables -t nat -A POSTROUTING -s "$LAN_SUBNET" -d "$LAN_SUBNET" -j RETURN
+        iptables -t nat -A POSTROUTING -s "$LAN_SUBNET" -d "$DMZ_SUBNET" -j RETURN
+        iptables -t nat -A POSTROUTING -s "$LAN_SUBNET" -j MASQUERADE
+        iptables -t nat -A POSTROUTING -s "$DMZ_SUBNET" -d "$LAN_SUBNET" -j RETURN
+        iptables -t nat -A POSTROUTING -s "$DMZ_SUBNET" -d "$DMZ_SUBNET" -j RETURN
+        iptables -t nat -A POSTROUTING -s "$DMZ_SUBNET" -j MASQUERADE
+    else
+        # Egress par Docker : on masque le trafic que la box pousse vers
+        # LAN/DMZ → chemin de retour propre, sans toucher aux routes des nodes.
+        iptables -t nat -A POSTROUTING -d "$LAN_SUBNET" -j MASQUERADE
+        iptables -t nat -A POSTROUTING -d "$DMZ_SUBNET" -j MASQUERADE
+    fi
+
+    local mode="egress=Docker"
+    [ "${EGRESS_VIA_BOX:-0}" = "1" ] && mode="egress=box (passerelle)"
+    echo "✅  box: règles appliquées ($n redirection(s), DMZ host=${DMZ_HOST:-aucun}, $mode)"
 }
 
 cmd_status() {
@@ -87,7 +121,11 @@ cmd_status() {
     echo "╠══════════════════════════════════════════════════════════╣"
     printf "  IP publique : %s\n" "$PUBLIC_IP"
     printf "  WAN : %-18s LAN : %-18s\n" "${WAN_SUBNET:-?}" "$LAN_SUBNET"
-    printf "  DMZ : %-18s hôte DMZ : %s\n" "$DMZ_SUBNET" "${DMZ_HOST:-?}"
+    printf "  DMZ : %-18s hôte DMZ : %s\n" "$DMZ_SUBNET" "${DMZ_HOST:-aucun}"
+    local egress="Docker (egress direct, source masquée en interne)"
+    [ "${EGRESS_VIA_BOX:-0}" = "1" ] && egress="box = passerelle par défaut (source réelle préservée)"
+    printf "  Mode egress : %s\n" "$egress"
+    [ -n "${DMZ_HOST:-}" ] && printf "  DMZ host    : tout le trafic entrant restant → %s\n" "$DMZ_HOST"
     echo "  ── Baux statiques ───────────────────────────────────────"
     local l
     for l in "${LEASES[@]:-}"; do [ -n "$l" ] && printf "    %s\n" "$l"; done
@@ -101,13 +139,28 @@ cmd_status() {
     done
     echo "  ── iptables nat (actif) ─────────────────────────────────"
     iptables -t nat -S | sed 's/^/    /'
-    echo "  ── iptables filter FORWARD (actif) ──────────────────────"
-    iptables -S FORWARD | sed 's/^/    /'
+    echo "  ── Pare-feu FORWARD (règles + compteurs paquets/octets) ─"
+    # -v -n : les compteurs rendent VISIBLE le pare-feu au travail
+    # (ex. combien de paquets DMZ→LAN ont été DROP).
+    iptables -L FORWARD -v -n | sed 's/^/    /'
+    echo "  ── Connexions suivies (NAT en direct) : box conntrack ───"
     echo "╚══════════════════════════════════════════════════════════╝"
 }
 
+cmd_conntrack() {
+    echo "── Table de suivi de connexions (NAT en direct) ──────────────"
+    echo "  original (src→dst) puis reply : voir DNAT / MASQUERADE traduire."
+    echo ""
+    if command -v conntrack >/dev/null 2>&1; then
+        conntrack -L 2>/dev/null || echo "  (table vide pour l'instant — génère du trafic puis relance)"
+    else
+        echo "  ⚠️  conntrack non installé dans la box (rebuild : da restart net-lab --build)"
+    fi
+}
+
 case "${1:-}" in
-    apply)  cmd_apply ;;
-    status) cmd_status ;;
-    *) die "usage : box {apply|status}" ;;
+    apply)     cmd_apply ;;
+    status)    cmd_status ;;
+    conntrack) cmd_conntrack ;;
+    *) die "usage : box {apply|status|conntrack}" ;;
 esac

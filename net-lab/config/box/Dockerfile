@@ -12,6 +12,8 @@ RUN apt-get update \
         iptables \
         iproute2 \
         procps \
+        tcpdump \
+        conntrack \
  && rm -rf /var/lib/apt/lists/*
 
 COPY box /usr/local/bin/box

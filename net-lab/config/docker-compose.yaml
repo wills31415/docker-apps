@@ -72,6 +72,8 @@ services:
       - NODE_NAME=gateway
       - ROOT_PASSWORD=labpass
       - LOG_LEVEL=VERBOSE
+      - BOX_GW_IP=192.168.1.1
+      - EGRESS_VIA_BOX=0
       - DMZ_SUBNET=192.168.2.0/24
       - BOX_LAN_IP=192.168.1.1
     cap_add:
@@ -100,6 +102,8 @@ services:
       - NODE_NAME=server-1
       - ROOT_PASSWORD=labpass
       - LOG_LEVEL=VERBOSE
+      - BOX_GW_IP=192.168.1.1
+      - EGRESS_VIA_BOX=0
       - DMZ_SUBNET=192.168.2.0/24
       - BOX_LAN_IP=192.168.1.1
     cap_add:
@@ -128,6 +132,10 @@ services:
       - NODE_NAME=nas
       - ROOT_PASSWORD=labpass
       - LOG_LEVEL=VERBOSE
+      - BOX_GW_IP=192.168.2.1
+      - EGRESS_VIA_BOX=0
+    cap_add:
+      - NET_ADMIN
     volumes:
       - netlab_nas_home:/root
       - netlab_nas_etcssh:/etc/ssh

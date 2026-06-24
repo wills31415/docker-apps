@@ -45,5 +45,11 @@ _netlab_upload() {
     fi
 }
 
+_netlab_box_status() {
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    COMPREPLY=( $(compgen -W "status conntrack --watch" -- "$cur") )
+}
+
 complete -F _netlab_cluster_exec cluster-exec.sh ./cluster-exec.sh
 complete -F _netlab_upload upload.sh ./upload.sh
+complete -F _netlab_box_status box-status.sh ./box-status.sh

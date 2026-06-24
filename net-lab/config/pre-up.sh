@@ -33,6 +33,9 @@ for var in WAN_SUBNET LAN_SUBNET DMZ_SUBNET; do
 done
 VALID_LOG="QUIET FATAL ERROR INFO VERBOSE DEBUG DEBUG1 DEBUG2 DEBUG3"
 echo "$VALID_LOG" | grep -qw "${LOG_LEVEL:-}" || { echo "❌  LOG_LEVEL invalide : '${LOG_LEVEL:-}'"; exit 1; }
+# Mode d'egress (box.conf) : 0 = egress Docker (défaut) ; 1 = box passerelle.
+EGRESS_VIA_BOX="${EGRESS_VIA_BOX:-0}"
+case "$EGRESS_VIA_BOX" in 0|1) ;; *) echo "❌  EGRESS_VIA_BOX doit valoir 0 ou 1 (reçu : '$EGRESS_VIA_BOX')"; exit 1 ;; esac
 
 # ── Plan d'adressage ─────────────────────────────────────────
 WAN_PFX="$(echo "$WAN_SUBNET" | cut -d/ -f1 | cut -d. -f1-3)"
@@ -83,14 +86,20 @@ echo "     box      : $PUBLIC_IP (wan) | $BOX_LAN (lan) | $BOX_DMZ (dmz)"
 echo "     gateway  : $GW_IP   |  nas : $NAS_IP"
 echo "     servers  : $N_SERVERS   |  clients : $N_CLIENTS"
 echo "     LogLevel : $LOG_LEVEL"
+if [ "$EGRESS_VIA_BOX" = "1" ]; then
+    echo "     egress   : via la box (passerelle par défaut, source réelle)"
+else
+    echo "     egress   : direct via Docker (mode par défaut)"
+fi
 echo ""
 
 # ══════════════════════════════════════════════════════════════
 #  Helper d'émission d'un service "node"
-#  $1 name  $2 role  $3 network  $4 ip  $5 uploads_group  $6 lan(0/1)
+#  $1 name  $2 role  $3 network  $4 ip  $5 uploads_group
+#  $6 box_gw (IP box du segment, "" pour les clients WAN)  $7 is_lan(0/1)
 # ══════════════════════════════════════════════════════════════
 emit_node() {
-    local name="$1" role="$2" net="$3" ip="$4" grp="$5" lan="$6"
+    local name="$1" role="$2" net="$3" ip="$4" grp="$5" box_gw="$6" is_lan="$7"
     cat << EOF
 
   $name:
@@ -107,10 +116,21 @@ emit_node() {
       - ROOT_PASSWORD=${ROOT_PASSWORD}
       - LOG_LEVEL=${LOG_LEVEL}
 EOF
-    if [ "$lan" = "1" ]; then
+    # Nodes routables par la box (LAN + DMZ) : passerelle du segment +
+    # mode egress + cap NET_ADMIN (pour (re)poser les routes). Les clients
+    # WAN restent sur l'egress Docker pur → rien à injecter.
+    if [ -n "$box_gw" ]; then
         cat << EOF
+      - BOX_GW_IP=${box_gw}
+      - EGRESS_VIA_BOX=${EGRESS_VIA_BOX}
+EOF
+        if [ "$is_lan" = "1" ]; then
+            cat << EOF
       - DMZ_SUBNET=${DMZ_SUBNET}
       - BOX_LAN_IP=${BOX_LAN}
+EOF
+        fi
+        cat << EOF
     cap_add:
       - NET_ADMIN
 EOF
@@ -194,25 +214,25 @@ EOF
 
 echo ""
 echo "  # ── GATEWAY (LAN, entrée des artistes) ──────────────────────"
-emit_node "gateway" "gateway" "lan" "$GW_IP" "gateway" 1
+emit_node "gateway" "gateway" "lan" "$GW_IP" "gateway" "$BOX_LAN" 1
 
 if [ "$N_SERVERS" -gt 0 ]; then
     echo ""
     echo "  # ── SERVERS (LAN) ───────────────────────────────────────────"
     for i in $(seq 1 "$N_SERVERS"); do
-        emit_node "server-$i" "server" "lan" "$(lease_ip "server-$i" "$LAN_PFX.$((20 + i - 1))")" "servers" 1
+        emit_node "server-$i" "server" "lan" "$(lease_ip "server-$i" "$LAN_PFX.$((20 + i - 1))")" "servers" "$BOX_LAN" 1
     done
 fi
 
 echo ""
 echo "  # ── NAS (DMZ) ───────────────────────────────────────────────"
-emit_node "nas" "nas" "dmz" "$NAS_IP" "nas" 0
+emit_node "nas" "nas" "dmz" "$NAS_IP" "nas" "$BOX_DMZ" 0
 
 if [ "$N_CLIENTS" -gt 0 ]; then
     echo ""
     echo "  # ── CLIENTS (WAN) ───────────────────────────────────────────"
     for i in $(seq 1 "$N_CLIENTS"); do
-        emit_node "client-$i" "client" "wan" "$(lease_ip "client-$i" "$WAN_PFX.$((101 + i - 1))")" "clients" 0
+        emit_node "client-$i" "client" "wan" "$(lease_ip "client-$i" "$WAN_PFX.$((101 + i - 1))")" "clients" "" 0
     done
 fi
 

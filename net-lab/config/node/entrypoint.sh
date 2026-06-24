@@ -4,6 +4,7 @@
 #  Variables :
 #    NODE_ROLE, NODE_NAME, ROOT_PASSWORD, LOG_LEVEL
 #    (LAN uniquement) DMZ_SUBNET + BOX_LAN_IP → route vers la DMZ
+#    (LAN+DMZ) BOX_GW_IP + EGRESS_VIA_BOX → passerelle par défaut = box
 # ============================================================
 set -euo pipefail
 
@@ -34,14 +35,25 @@ Subsystem sftp /usr/lib/openssh/sftp-server
 SSHD_CONF
 ssh-keygen -A >/dev/null 2>&1
 
-# ── 3. Route vers la DMZ (machines du LAN seulement) ──────────
-# La route par défaut (Internet) reste gérée par Docker ; on n'ajoute
-# qu'une route spécifique vers le segment DMZ, via la box.
+# ── 3. Routage ────────────────────────────────────────────────
+# (a) Nodes du LAN : route spécifique vers la DMZ via la box. Présente
+#     dans les DEUX modes — c'est elle qui fait fonctionner LAN→DMZ.
 if [ -n "${DMZ_SUBNET:-}" ] && [ -n "${BOX_LAN_IP:-}" ]; then
     if ip route replace "$DMZ_SUBNET" via "$BOX_LAN_IP" 2>/dev/null; then
         echo "✔  route $DMZ_SUBNET via la box ($BOX_LAN_IP)"
     else
         echo "⚠️  route DMZ non ajoutée (cap NET_ADMIN manquante ?)"
+    fi
+fi
+# (b) Mode EGRESS_VIA_BOX=1 : la box devient la passerelle PAR DÉFAUT.
+#     Tout le trafic (Internet compris) traverse alors la box → source
+#     réelle préservée + point de contrôle unique. Sinon Docker reste
+#     la passerelle par défaut (egress direct).
+if [ "${EGRESS_VIA_BOX:-0}" = "1" ] && [ -n "${BOX_GW_IP:-}" ]; then
+    if ip route replace default via "$BOX_GW_IP" 2>/dev/null; then
+        echo "✔  passerelle par défaut → box ($BOX_GW_IP)  [EGRESS_VIA_BOX=1]"
+    else
+        echo "⚠️  bascule passerelle par défaut échouée (cap NET_ADMIN ?)"
     fi
 fi
 

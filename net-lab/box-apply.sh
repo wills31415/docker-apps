@@ -39,14 +39,14 @@ _val()    { ( set +eu; source "$1" >/dev/null 2>&1; printf '%s' "${!2-}" ); }
 _leases() { ( set +eu; source "$1" >/dev/null 2>&1; printf '%s\n' "${LEASES[@]:-}" ); }
 if [ -f "$APPLIED" ]; then
     drift=0
-    for v in PUBLIC_IP WAN_SUBNET LAN_SUBNET DMZ_SUBNET; do
+    for v in PUBLIC_IP WAN_SUBNET LAN_SUBNET DMZ_SUBNET EGRESS_VIA_BOX; do
         [ "$(_val "$CFG" "$v")" = "$(_val "$APPLIED" "$v")" ] || drift=1
     done
     [ "$(_leases "$CFG")" = "$(_leases "$APPLIED")" ] || drift=1
     if [ "$drift" -eq 1 ]; then
-        echo "⚠️  Changement STRUCTUREL détecté (IP publique / sous-réseaux / baux)."
-        echo "    Le hot-reload n'applique que DMZ + redirections."
-        echo "    Pour appliquer le reste :  da restart net-lab"
+        echo "⚠️  Changement STRUCTUREL détecté (IP publique / sous-réseaux / baux / mode egress)."
+        echo "    Le hot-reload recharge bien la box, mais les nodes ne reprennent"
+        echo "    leur plan d'adressage / passerelle qu'au prochain :  da restart net-lab"
         echo ""
     fi
 fi

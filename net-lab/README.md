@@ -72,6 +72,17 @@ curl http://203.0.113.2:8080          # → service HTTP démo du NAS, via DNAT
 ssh -J root@203.0.113.2:2222 root@192.168.1.20
 ```
 
+### Boîte à outils réseau (sur les nodes)
+
+Chaque machine embarque de quoi diagnostiquer : `ping`, `traceroute`, `mtr`,
+`dig`/`nslookup`, `tcpdump`, `nc`, `iperf3` et `nmap`. Exemples parlants :
+
+```bash
+nmap 203.0.113.2                     # quels ports la box expose-t-elle ?
+traceroute 203.0.113.2               # la box apparaît comme hop (2 hops si EGRESS_VIA_BOX=1)
+tcpdump -ni any port 8080            # observer le trafic redirigé
+```
+
 ---
 
 ## La box — son « IHM »
@@ -79,13 +90,15 @@ ssh -J root@203.0.113.2:2222 root@192.168.1.20
 La box se configure **uniquement** via un fichier + un script, jamais par
 `docker exec` ni `cluster-exec.sh` (comme une vraie box : tout passe par l'IHM).
 
-- **`config/box.conf`** — la config (IP publique, baux statiques, DMZ,
-  redirections de ports). C'est le fichier que tu édites.
+- **`config/box.conf`** — la config (IP publique, **mode d'egress**, baux
+  statiques, DMZ host, redirections de ports). C'est le fichier que tu édites.
 - **`./box-apply.sh`** — « Appliquer » : valide, pousse la config et recharge
   **à chaud** la DMZ + les redirections (iptables). Les champs `[STRUCTUREL]`
-  (IP publique, sous-réseaux, baux) demandent un `da restart`.
-- **`./box-status.sh`** — « Ouvrir l'IHM » : affiche l'état courant (config +
-  règles iptables actives).
+  (IP publique, sous-réseaux, baux, `EGRESS_VIA_BOX`) demandent un `da restart`.
+- **`./box-status.sh`** — « Ouvrir l'IHM » : état courant (config + règles +
+  **compteurs** de paquets, pour *voir* le pare-feu au travail).
+  `./box-status.sh conntrack` montre le NAT traduire en direct ; `--watch`
+  rafraîchit en continu.
 
 Exemple : ajouter une redirection `tcp:8443:server-1:443` dans `box.conf`, puis
 `./box-apply.sh` → active immédiatement, sans couper le lab.
@@ -127,9 +140,16 @@ docker volume ls -f name=netlab_
 
 ## Notes
 
-- **Egress Internet** : les machines sortent directement via Docker. La box ne
-  fait que le DNAT entrant et le routage inter-segments.
-- **IP source** : le trafic redirigé/inter-segments est MASQUERADé par la box,
-  donc les cibles voient l'IP de la box (comme un routeur NAT sur le chemin).
+- **Mode d'egress (`EGRESS_VIA_BOX` dans `box.conf`)** — qui est la passerelle ?
+  - `0` (défaut) : les machines sortent **directement via Docker**. La box ne
+    fait que le DNAT entrant + le routage inter-segments, qu'elle MASQUERADE →
+    les cibles voient l'IP de la box, **pas la vraie source**.
+  - `1` : la box devient la **passerelle par défaut** des nodes LAN/DMZ. Tout le
+    trafic la traverse, la **vraie source est préservée** en interne, et le NAT
+    ne se fait plus qu'en sortie WAN (comme un vrai routeur). Parfait pour tout
+    observer en un point. `[STRUCTUREL]` → `da restart` pour basculer.
+- **DMZ host** : `DMZ_HOST` reçoit **tout le trafic entrant non explicitement
+  redirigé** (la fonction « DMZ host » d'une box grand public). Les `FORWARDS`
+  explicites gardent la priorité ; laisser vide pour désactiver.
 - **Résolution de noms** : Docker résout les noms **par réseau**. Les machines
   d'un même segment se résolvent par nom ; entre segments, on utilise l'IP.

@@ -24,7 +24,9 @@ da down net-lab
 
 # Box "IHM" (the ONLY way to touch the router)
 ./box-apply.sh              # validate box.conf, push it, hot-reload DMZ + port-forwards
-./box-status.sh             # show applied config + live iptables
+./box-status.sh             # show applied config + live iptables + packet counters
+./box-status.sh conntrack   # live NAT translations (DNAT / MASQUERADE)
+./box-status.sh --watch     # refresh status (or conntrack) every 2s
 
 # Nodes (never the box)
 ./cluster-exec.sh <group|node> "<cmd>"   # parallel docker exec; groups: all|gateway|servers|clients|nas
@@ -45,9 +47,10 @@ hand-edited files — never edit the compose by hand:
 
 - **`config/topology.conf`** — "the hardware": `N_SERVERS`, `N_CLIENTS`,
   `ROOT_PASSWORD`, `LOG_LEVEL`. (nas=1, gateway=1 are fixed.)
-- **`config/box.conf`** — "the router IHM": `PUBLIC_IP`, the WAN/LAN/DMZ subnets,
-  static `LEASES` (`"name:ip"`, else auto-assigned), `DMZ_HOST`, and `FORWARDS`
-  (`"proto:public_port:target:target_port"`).
+- **`config/box.conf`** — "the router IHM": `PUBLIC_IP`, `EGRESS_VIA_BOX` (0/1
+  egress toggle), the WAN/LAN/DMZ subnets, static `LEASES` (`"name:ip"`, else
+  auto-assigned), `DMZ_HOST` (real "DMZ host": catch-all DNAT for inbound ports
+  not explicitly forwarded), and `FORWARDS` (`"proto:public_port:target:target_port"`).
 
 `pre-up.sh` resolves every node's IP (lease or auto), builds a `HOSTMAP`
 (`name=ip;…`) passed to the box as env, copies `box.conf` → `shared/box/box.conf`
@@ -60,12 +63,14 @@ reject it). Its lifecycle:
 
 - It bind-mounts `shared/box/box.conf` (ro) and runs `box apply` on start.
 - The in-container `box` CLI (`config/box/box`) has `apply` (flush + rebuild
-  iptables from box.conf + `$HOSTMAP`) and `status`.
+  iptables from box.conf + `$HOSTMAP`), `status` (now also shows the egress mode
+  + FORWARD packet counters), and `conntrack` (live NAT table).
 - Host `box-apply.sh` copies `config/box.conf` → `shared/box/box.conf` then
   `docker exec net-lab-box box apply` → **hot reload**. It warns on `[STRUCTUREL]`
-  drift (PUBLIC_IP / subnets / LEASES) since those need `da restart` (ipam is fixed
-  at container create). So `config/box.conf` is the editable source; the box reads
-  the pushed copy — like changing a field in an IHM vs clicking Apply.
+  drift (PUBLIC_IP / subnets / LEASES / EGRESS_VIA_BOX) since those need `da restart`
+  (ipam + each node's default route are fixed at container create). So
+  `config/box.conf` is the editable source; the box reads the pushed copy — like
+  changing a field in an IHM vs clicking Apply.
 
 ### Routing / firewall model (the delicate part)
 
@@ -73,24 +78,39 @@ reject it). Its lifecycle:
   (so the Docker bridge gateway is forced to `.254` for LAN/DMZ in the generated
   ipam — a container can't take the bridge's gateway IP).
 - Box: `ip_forward=1`, `NET_ADMIN`. iptables = DNAT per FORWARD rule (matched on
-  `-d $PUBLIC_IP --dport`), MASQUERADE toward LAN/DMZ (clean return path), and a
+  `-d $PUBLIC_IP --dport`), an optional `DMZ_HOST` catch-all DNAT (all remaining
+  inbound tcp/udp → that host, added AFTER explicit forwards so they win), a
   FORWARD chain implementing the DMZ matrix (`DMZ→LAN` DROP, `LAN→DMZ` ACCEPT,
-  DNAT'd inbound ACCEPT, established ACCEPT).
-- **Egress is Docker's**, not the box: nodes keep Docker's default route for
-  Internet. Therefore LAN nodes (gateway, servers) get **`cap_add: NET_ADMIN`** and
-  their entrypoint adds a static route `DMZ_SUBNET via box` so `LAN→DMZ` works.
-  NAS/clients need no route changes (NAS has no LAN route → `DMZ→LAN` is also
-  blocked by routing, belt-and-suspenders).
-- Consequence: forwarded/inter-segment traffic is MASQUERADEd, so targets see the
-  box IP as source. DNS resolves per-network (same segment by name, cross-segment
-  by IP).
+  DNAT'd inbound ACCEPT, established ACCEPT), plus mode-dependent SNAT (below).
+- **Egress mode is a toggle (`EGRESS_VIA_BOX`)**:
+  - `0` (default): egress is **Docker's**, not the box — nodes keep Docker's
+    default route for Internet. The box MASQUERADEs traffic it pushes toward
+    LAN/DMZ (`POSTROUTING -d LAN/DMZ`) so the return path is clean even though
+    nodes don't route back through it. Consequence: forwarded/inter-segment
+    traffic is SNATed → targets see the **box IP** as source.
+  - `1`: the box is the **default gateway** of LAN/DMZ nodes (entrypoint does
+    `ip route replace default via $BOX_GW_IP`). SNAT happens only toward the
+    outside (`POSTROUTING -s LAN/DMZ ! -d LAN ! -d DMZ`), so internal traffic
+    (LAN↔DMZ, inbound DNAT) keeps the **real source IP** and everything funnels
+    through the box (single observation point). Toggling is `[STRUCTUREL]`
+    (node routes are set at start) → `da restart`.
+- LAN nodes (gateway, servers) get `cap_add: NET_ADMIN` + a static route
+  `DMZ_SUBNET via box` (both modes, so `LAN→DMZ` works). NAS now also gets
+  `NET_ADMIN` + `BOX_GW_IP` (used only when `EGRESS_VIA_BOX=1`); in mode 0 it has
+  no LAN route → `DMZ→LAN` is also blocked by routing (belt-and-suspenders), in
+  mode 1 it default-routes via the box → `DMZ→LAN` is blocked by the FORWARD DROP.
+  Clients (WAN) are never rerouted — they are the external Internet.
+- DNS resolves per-network (same segment by name, cross-segment by IP), both modes.
 
 ### Node image (one image, role via env)
 
 `config/node/entrypoint.sh` keys off `NODE_ROLE`: sets root password + sshd
 (LogLevel from `LOG_LEVEL`), runs `sshd -D` on all roles; LAN roles add the DMZ
-route (needs `DMZ_SUBNET` + `BOX_LAN_IP` env); `nas` also starts a demo
-`python3 -m http.server 8080`. Editing an entrypoint requires `--build`.
+route (needs `DMZ_SUBNET` + `BOX_LAN_IP` env); LAN+DMZ roles also switch their
+default route to the box when `EGRESS_VIA_BOX=1` (needs `BOX_GW_IP`); `nas` also
+starts a demo `python3 -m http.server 8080`. The node image ships a network
+toolbox (ping/traceroute/mtr/dig/tcpdump/nc/iperf3/nmap); the box image adds
+tcpdump + conntrack. Editing an entrypoint or Dockerfile requires `--build`.
 
 ### Persistence
 

@@ -31,3 +31,11 @@ echo "║    ./box-status.sh    affiche l'état courant du routeur       ║"
 echo "║  Machines : ./cluster-exec.sh <groupe> \"<cmd>\"  (hors box)    ║"
 echo "╚════════════════════════════════════════════════════════════════╝"
 echo ""
+if [ "${EGRESS_VIA_BOX:-0}" = "1" ]; then
+    echo "  🌐  Egress : via la box (passerelle par défaut — source réelle préservée)"
+else
+    echo "  🌐  Egress : direct via Docker (mode par défaut)"
+fi
+echo "  🔎  Diag (nodes) : ping · traceroute · mtr · dig · tcpdump · nc · iperf3 · nmap"
+echo "  👁️   Box : ./box-status.sh  ·  ./box-status.sh conntrack  ·  ./box-status.sh --watch"
+echo ""
