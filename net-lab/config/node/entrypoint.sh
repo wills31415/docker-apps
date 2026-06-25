@@ -16,7 +16,7 @@ LOG_LEVEL="${LOG_LEVEL:-INFO}"
 [ -n "${ROOT_PASSWORD:-}" ] && echo "root:${ROOT_PASSWORD}" | chpasswd
 
 # ── 2. Configuration et clés sshd ─────────────────────────────
-mkdir -p /run/sshd
+mkdir -p /run/sshd /etc/ssh/sshd_config.d
 cat > /etc/ssh/sshd_config << SSHD_CONF
 Port 22
 AddressFamily any
@@ -32,6 +32,12 @@ PrintMotd no
 LogLevel ${LOG_LEVEL}
 
 Subsystem sftp /usr/lib/openssh/sftp-server
+
+# Ce fichier est régénéré à chaque boot ; les drop-ins de
+# /etc/ssh/sshd_config.d/ (volume /etc/ssh persistant) survivent, eux. Inclus
+# en FIN de config pour qu'un bloc Match d'un drop-in ne fuite pas dans la
+# config de base. Dossier vide par défaut → aucun changement de comportement.
+Include /etc/ssh/sshd_config.d/*.conf
 SSHD_CONF
 ssh-keygen -A >/dev/null 2>&1
 
