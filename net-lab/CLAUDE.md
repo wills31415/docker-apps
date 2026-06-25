@@ -41,7 +41,6 @@ da down net-lab
 # Nodes (never the box)
 ./cluster-exec.sh <group|node> "<cmd>"   # parallel docker exec; groups: all|gateway|servers|clients|nas
 ./upload.sh <group> <file>               # drop file into /uploads (ro)
-./volumes-rm.sh                          # legacy: wipe any leftover netlab_ volumes (nodes no longer have named volumes)
 ```
 
 Auth on every node: `root` / `ROOT_PASSWORD` (password auth, no keys

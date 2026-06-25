@@ -126,7 +126,6 @@ auto-assignée dans le sous-réseau de leur rôle.
 ./uploads-clear.sh <groupe>                  # purge shared/uploads/<groupe>
 ./reprovision.sh <groupe|machine>            # re-déclenche le first-boot sur une machine vivante
 ./stop.sh / ./start.sh / ./reboot.sh         # soft cycle (temporaire — en attente de `da start/stop`)
-./volumes-rm.sh                              # legacy : ramasse d'éventuels volumes netlab_ résiduels
 source completions.bash                       # autocomplétion bash (groupes + machines)
 ```
 

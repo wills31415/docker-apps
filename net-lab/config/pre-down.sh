@@ -5,6 +5,8 @@
 set -euo pipefail
 echo ""
 echo "🛑  Arrêt de net-lab…"
-echo "    Volumes nommés (/root, /etc/ssh des machines) : conservés"
-echo "    shared/uploads/ et shared/box/ : conservés"
+echo "    ⚠  Conteneurs détruits ⇒ writable layer des nodes perdu (users,"
+echo "       paquets installés à chaud, tweaks /etc, etc.)."
+echo "       Pour un vrai reboot préservant l'état : ./reboot.sh"
+echo "    Bind-mounts hôte (shared/) : conservés."
 echo ""
