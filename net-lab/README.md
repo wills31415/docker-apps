@@ -124,19 +124,31 @@ auto-assignée dans le sous-réseau de leur rôle.
 ./cluster-exec.sh <groupe|machine> "<cmd>"   # exec parallèle (all|gateway|servers|clients|nas)
 ./upload.sh <groupe> <fichier>               # dépose un fichier dans /uploads (ro)
 ./uploads-clear.sh <groupe>                  # purge shared/uploads/<groupe>
-./volumes-rm.sh                              # supprime les volumes netlab_ (reset complet)
+./reprovision.sh <groupe|machine>            # re-déclenche le first-boot sur une machine vivante
+./stop.sh / ./start.sh / ./reboot.sh         # soft cycle (temporaire — en attente de `da start/stop`)
+./volumes-rm.sh                              # legacy : ramasse d'éventuels volumes netlab_ résiduels
 source completions.bash                       # autocomplétion bash (groupes + machines)
 ```
 
-## Persistance
+## Persistance — sémantique VM
 
-Les volumes nommés `netlab_<machine>_{home,etcssh}` survivent à `da down`
-(clés d'hôte SSH stables, `/root` conservé).
+Les nodes **n'ont plus de volumes nommés**. Leur persistance vient du
+*writable layer* du conteneur, que Docker préserve entre `docker compose stop`
+et `start` mais détruit à `down`/`up` (= conteneurs recréés).
 
-```bash
-docker volume ls -f name=netlab_
-./volumes-rm.sh           # tout effacer (cluster arrêté)
-```
+- **Reboot fidèle** (`./reboot.sh` = `stop` + `start`) : **tout** le filesystem
+  du node survit — config dans `/etc`, users, `/home`, logs, paquets installés
+  avec `apt install`, restructurations top-level (`rm /home && ln -s /users /home`
+  survit aussi). C'est le comportement d'une vraie machine.
+- **Fresh install** (`da restart net-lab` = `down` + `up`, ou `da up --build`) :
+  conteneurs recréés depuis l'image, writable layer détruit, marker
+  `/var/lib/net-lab/.provisioned` absent ⇒ phase 1 de l'entrypoint ré-exécutée.
+- **Propager une modif de `topology.conf` sans tout wiper** :
+  `./reprovision.sh <node|all>` régénère `shared/node/runtime.conf`
+  (bind-monté en ro sur `/net-lab/runtime.conf`), supprime le marker, puis
+  restart. La phase 1 re-source le fichier ⇒ vraie propagation des valeurs
+  hot-tunables (`LOG_LEVEL`, `ROOT_PASSWORD`). Le reste du writable layer
+  est préservé.
 
 ## Notes
 

@@ -50,7 +50,7 @@ services:
     sysctls:
       - net.ipv4.ip_forward=1
     environment:
-      - HOSTMAP=gateway=192.168.1.10;server-1=192.168.1.20;nas=192.168.2.10;client-1=203.0.113.101
+      - HOSTMAP=gateway=192.168.1.10;server-1=192.168.1.20;server-2=192.168.1.21;nas=192.168.2.10;client-1=203.0.113.101;client-2=203.0.113.102
     volumes:
       - ../shared/box/box.conf:/etc/net-lab/box.conf:ro
     restart: unless-stopped
@@ -70,8 +70,6 @@ services:
     environment:
       - NODE_ROLE=gateway
       - NODE_NAME=gateway
-      - ROOT_PASSWORD=labpass
-      - LOG_LEVEL=VERBOSE
       - BOX_GW_IP=192.168.1.1
       - EGRESS_VIA_BOX=0
       - DMZ_SUBNET=192.168.2.0/24
@@ -79,8 +77,12 @@ services:
     cap_add:
       - NET_ADMIN
     volumes:
-      - netlab_gateway_home:/root
-      - netlab_gateway_etcssh:/etc/ssh
+      # Script d'entrée bind-monté depuis l'hôte (itération sans --build).
+      - ../config/node/entrypoint.sh:/net-lab/entrypoint.sh:ro
+      # Runtime config hot-tunable (lue en phase 1 ; reprovision la régénère
+      # puis re-trigger phase 1 ⇒ vraie propagation sans recreate).
+      - ../shared/node/runtime.conf:/net-lab/runtime.conf:ro
+      # Uploads partagés (host → conteneur, read-only).
       - ../shared/uploads/all:/uploads/all:ro
       - ../shared/uploads/gateway:/uploads/role:ro
     restart: unless-stopped
@@ -100,8 +102,6 @@ services:
     environment:
       - NODE_ROLE=server
       - NODE_NAME=server-1
-      - ROOT_PASSWORD=labpass
-      - LOG_LEVEL=VERBOSE
       - BOX_GW_IP=192.168.1.1
       - EGRESS_VIA_BOX=0
       - DMZ_SUBNET=192.168.2.0/24
@@ -109,8 +109,42 @@ services:
     cap_add:
       - NET_ADMIN
     volumes:
-      - netlab_server-1_home:/root
-      - netlab_server-1_etcssh:/etc/ssh
+      # Script d'entrée bind-monté depuis l'hôte (itération sans --build).
+      - ../config/node/entrypoint.sh:/net-lab/entrypoint.sh:ro
+      # Runtime config hot-tunable (lue en phase 1 ; reprovision la régénère
+      # puis re-trigger phase 1 ⇒ vraie propagation sans recreate).
+      - ../shared/node/runtime.conf:/net-lab/runtime.conf:ro
+      # Uploads partagés (host → conteneur, read-only).
+      - ../shared/uploads/all:/uploads/all:ro
+      - ../shared/uploads/servers:/uploads/role:ro
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+
+  server-2:
+    build:
+      context: ./node
+    container_name: net-lab-server-2
+    hostname: server-2
+    networks:
+      lan:
+        ipv4_address: 192.168.1.21
+    environment:
+      - NODE_ROLE=server
+      - NODE_NAME=server-2
+      - BOX_GW_IP=192.168.1.1
+      - EGRESS_VIA_BOX=0
+      - DMZ_SUBNET=192.168.2.0/24
+      - BOX_LAN_IP=192.168.1.1
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      # Script d'entrée bind-monté depuis l'hôte (itération sans --build).
+      - ../config/node/entrypoint.sh:/net-lab/entrypoint.sh:ro
+      # Runtime config hot-tunable (lue en phase 1 ; reprovision la régénère
+      # puis re-trigger phase 1 ⇒ vraie propagation sans recreate).
+      - ../shared/node/runtime.conf:/net-lab/runtime.conf:ro
+      # Uploads partagés (host → conteneur, read-only).
       - ../shared/uploads/all:/uploads/all:ro
       - ../shared/uploads/servers:/uploads/role:ro
     restart: unless-stopped
@@ -130,15 +164,17 @@ services:
     environment:
       - NODE_ROLE=nas
       - NODE_NAME=nas
-      - ROOT_PASSWORD=labpass
-      - LOG_LEVEL=VERBOSE
       - BOX_GW_IP=192.168.2.1
       - EGRESS_VIA_BOX=0
     cap_add:
       - NET_ADMIN
     volumes:
-      - netlab_nas_home:/root
-      - netlab_nas_etcssh:/etc/ssh
+      # Script d'entrée bind-monté depuis l'hôte (itération sans --build).
+      - ../config/node/entrypoint.sh:/net-lab/entrypoint.sh:ro
+      # Runtime config hot-tunable (lue en phase 1 ; reprovision la régénère
+      # puis re-trigger phase 1 ⇒ vraie propagation sans recreate).
+      - ../shared/node/runtime.conf:/net-lab/runtime.conf:ro
+      # Uploads partagés (host → conteneur, read-only).
       - ../shared/uploads/all:/uploads/all:ro
       - ../shared/uploads/nas:/uploads/role:ro
     restart: unless-stopped
@@ -158,32 +194,43 @@ services:
     environment:
       - NODE_ROLE=client
       - NODE_NAME=client-1
-      - ROOT_PASSWORD=labpass
-      - LOG_LEVEL=VERBOSE
     volumes:
-      - netlab_client-1_home:/root
-      - netlab_client-1_etcssh:/etc/ssh
+      # Script d'entrée bind-monté depuis l'hôte (itération sans --build).
+      - ../config/node/entrypoint.sh:/net-lab/entrypoint.sh:ro
+      # Runtime config hot-tunable (lue en phase 1 ; reprovision la régénère
+      # puis re-trigger phase 1 ⇒ vraie propagation sans recreate).
+      - ../shared/node/runtime.conf:/net-lab/runtime.conf:ro
+      # Uploads partagés (host → conteneur, read-only).
       - ../shared/uploads/all:/uploads/all:ro
       - ../shared/uploads/clients:/uploads/role:ro
     restart: unless-stopped
     tty: true
     stdin_open: true
 
-# ── Volumes nommés (préfixe netlab_) ────────────────────────
-volumes:
-  netlab_gateway_home:
-    name: netlab_gateway_home
-  netlab_gateway_etcssh:
-    name: netlab_gateway_etcssh
-  netlab_server-1_home:
-    name: netlab_server-1_home
-  netlab_server-1_etcssh:
-    name: netlab_server-1_etcssh
-  netlab_nas_home:
-    name: netlab_nas_home
-  netlab_nas_etcssh:
-    name: netlab_nas_etcssh
-  netlab_client-1_home:
-    name: netlab_client-1_home
-  netlab_client-1_etcssh:
-    name: netlab_client-1_etcssh
+  client-2:
+    build:
+      context: ./node
+    container_name: net-lab-client-2
+    hostname: client-2
+    networks:
+      wan:
+        ipv4_address: 203.0.113.102
+    environment:
+      - NODE_ROLE=client
+      - NODE_NAME=client-2
+    volumes:
+      # Script d'entrée bind-monté depuis l'hôte (itération sans --build).
+      - ../config/node/entrypoint.sh:/net-lab/entrypoint.sh:ro
+      # Runtime config hot-tunable (lue en phase 1 ; reprovision la régénère
+      # puis re-trigger phase 1 ⇒ vraie propagation sans recreate).
+      - ../shared/node/runtime.conf:/net-lab/runtime.conf:ro
+      # Uploads partagés (host → conteneur, read-only).
+      - ../shared/uploads/all:/uploads/all:ro
+      - ../shared/uploads/clients:/uploads/role:ro
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+
+# Aucun volume nommé pour les nodes : la persistance vient du writable
+# layer du conteneur (préservé par docker compose stop/start). Pour un
+# fresh install : da down + da up --build (= conteneurs recréés).

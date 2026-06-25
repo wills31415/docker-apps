@@ -58,9 +58,8 @@ lease_ip() {
 }
 
 # ── Résolution des IP de chaque machine + HOSTMAP ────────────
-declare -a NAMES
 HOSTMAP=""
-add_host() { NAMES+=("$1"); HOSTMAP+="${HOSTMAP:+;}$1=$2"; }
+add_host() { HOSTMAP+="${HOSTMAP:+;}$1=$2"; }
 
 GW_IP="$(lease_ip gateway "$LAN_PFX.10")"
 add_host "gateway" "$GW_IP"
@@ -73,12 +72,21 @@ for i in $(seq 1 "$N_CLIENTS"); do
     add_host "client-$i" "$(lease_ip "client-$i" "$WAN_PFX.$((101 + i - 1))")"
 done
 
-# ── Répertoires partagés (uploads + config appliquée box) ────
-mkdir -p "$SHARED/box" \
+# ── Répertoires partagés (uploads + config appliquée box + runtime nodes) ─
+mkdir -p "$SHARED/box" "$SHARED/node" \
          "$SHARED/uploads/all" "$SHARED/uploads/nas" "$SHARED/uploads/gateway" \
          "$SHARED/uploads/servers" "$SHARED/uploads/clients"
 # Copie de la config "appliquée" que la box lit réellement (l'IHM pousse ici).
 cp "$BOXCONF" "$SHARED/box/box.conf"
+# Runtime config des nodes — bind-monté ro dans chaque conteneur à
+# /net-lab/runtime.conf. Source de vérité hot-tunable : tout admin qui touche
+# ces valeurs dans topology.conf peut les pousser sur des conteneurs vivants
+# via ./reprovision.sh (sans recreate, sans perdre l'état writable).
+cat > "$SHARED/node/runtime.conf" << RUNTIME_CONF
+# AUTO-GÉNÉRÉ par pre-up.sh depuis topology.conf — NE PAS ÉDITER À LA MAIN.
+ROOT_PASSWORD=${ROOT_PASSWORD}
+LOG_LEVEL=${LOG_LEVEL}
+RUNTIME_CONF
 
 echo ""
 echo "🔧  Génération docker-compose.yaml"
@@ -113,8 +121,6 @@ emit_node() {
     environment:
       - NODE_ROLE=$role
       - NODE_NAME=$name
-      - ROOT_PASSWORD=${ROOT_PASSWORD}
-      - LOG_LEVEL=${LOG_LEVEL}
 EOF
     # Nodes routables par la box (LAN + DMZ) : passerelle du segment +
     # mode egress + cap NET_ADMIN (pour (re)poser les routes). Les clients
@@ -137,8 +143,12 @@ EOF
     fi
     cat << EOF
     volumes:
-      - netlab_${name}_home:/root
-      - netlab_${name}_etcssh:/etc/ssh
+      # Script d'entrée bind-monté depuis l'hôte (itération sans --build).
+      - ../config/node/entrypoint.sh:/net-lab/entrypoint.sh:ro
+      # Runtime config hot-tunable (lue en phase 1 ; reprovision la régénère
+      # puis re-trigger phase 1 ⇒ vraie propagation sans recreate).
+      - ../shared/node/runtime.conf:/net-lab/runtime.conf:ro
+      # Uploads partagés (host → conteneur, read-only).
       - ../shared/uploads/all:/uploads/all:ro
       - ../shared/uploads/${grp}:/uploads/role:ro
     restart: unless-stopped
@@ -237,14 +247,9 @@ if [ "$N_CLIENTS" -gt 0 ]; then
 fi
 
 echo ""
-echo "# ── Volumes nommés (préfixe netlab_) ────────────────────────"
-echo "volumes:"
-for n in "${NAMES[@]}"; do
-    echo "  netlab_${n}_home:"
-    echo "    name: netlab_${n}_home"
-    echo "  netlab_${n}_etcssh:"
-    echo "    name: netlab_${n}_etcssh"
-done
+echo "# Aucun volume nommé pour les nodes : la persistance vient du writable"
+echo "# layer du conteneur (préservé par docker compose stop/start). Pour un"
+echo "# fresh install : da down + da up --build (= conteneurs recréés)."
 
 } > "$OUTPUT"
 

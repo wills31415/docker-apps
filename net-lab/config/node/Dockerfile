@@ -27,11 +27,12 @@ RUN apt-get update \
         iperf3 \
         nmap \
  && rm -rf /var/lib/apt/lists/* \
- && mkdir -p /run/sshd /root/.ssh \
+ && mkdir -p /run/sshd /root/.ssh /net-lab \
  && chmod 700 /root/.ssh
 
 EXPOSE 22
 
-ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# entrypoint.sh est bind-monté depuis l'hôte vers /net-lab/ par le compose
+# (pattern identique à box.conf). Itérer dessus = `./reboot.sh`, jamais
+# `--build`. /net-lab/ existe juste comme point de montage.
+ENTRYPOINT ["/usr/bin/tini", "--", "/net-lab/entrypoint.sh"]
